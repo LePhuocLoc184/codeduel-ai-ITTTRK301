@@ -1,3 +1,5 @@
+from app.core.config import settings
+from app.models import Base
 import asyncio
 from logging.config import fileConfig
 
@@ -17,8 +19,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
-from app.models import Base
-from app.core.config import settings
 config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL))
 # for 'autogenerate' support
 # from myapp import mymodel

@@ -1,0 +1,79 @@
+# ==========================================
+# 1. Environment Variables & Credentials (BẢO MẬT - BẮT BỘC IGNORE)
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ==========================================
+# 2. Virtual Environment (Môi trường ảo Python)
+# ==========================================
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# ==========================================
+# 3. Python Cache & Compiled Files
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==========================================
+# 4. IDEs & Code Editors (VS Code, PyCharm, Cursor)
+# ==========================================
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ==========================================
+# 5. Testing & Code Quality Tools
+# ==========================================
+.pytest_cache/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ==========================================
+# 6. Database & Local Storage Files
+# ==========================================
+*.sqlite3
+*.db
+*.log
+
+# ==========================================
+# 7. Alembic Temporary Files
+# ==========================================
+# Giữ lại folder alembic/ và alembic/versions/, chỉ ignore cache nếu có
+alembic/versions/__pycache__/
