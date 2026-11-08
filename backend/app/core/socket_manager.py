@@ -1,25 +1,25 @@
 import asyncio
 from uuid import UUID
-from typing import Dict, Set
 from fastapi import WebSocket
+
 
 class ConnectionManager:
     def __init__(self):
         # State Connection Pool (Lưu trữ kết nối: room_code -> {user_id: WebSocket})
-        self.active_rooms: Dict[str, Dict[UUID, WebSocket]] = {}
-        
+        self.active_rooms: dict[str, dict[UUID, WebSocket]] = {}
+
         # Quản lý trạng thái Sẵn sàng của người chơi trong phòng
-        self.ready_players: Dict[str, Set[UUID]] = {}
-        
+        self.ready_players: dict[str, set[UUID]] = {}
+
         # Quản lý trạng thái phòng tránh kích hoạt đếm ngược nhiều lần
         # Các trạng thái: 'WAITING', 'COUNTING', 'PLAYING'
-        self.room_states: Dict[str, str] = {}
-        
+        self.room_states: dict[str, str] = {}
+
         # Đảm bảo Thread-Safety / Async Safe khi thao tác với Dictionary
         self._lock = asyncio.Lock()
-        
+
         # Lưu reference của các background task (đếm ngược) để tránh bị Garbage Collect
-        self._tasks: Set[asyncio.Task] = set()
+        self._tasks: set[asyncio.Task] = set()
 
     async def connect(self, websocket: WebSocket, room_code: str, user_id: UUID) -> bool:
         """
@@ -32,14 +32,6 @@ class ConnectionManager:
                 self.ready_players[room_code] = set()
                 self.room_states[room_code] = 'WAITING'
 
-            # Đóng kết nối cũ nếu cùng user_id vào lại (mở tab/thiết bị khác)
-            if user_id in self.active_rooms[room_code]:
-                old_ws = self.active_rooms[room_code][user_id]
-                try:
-                    await old_ws.close(code=4001, reason="Replaced by new connection")
-                except Exception:
-                    pass
-
             # Giới hạn phòng tối đa 2 người chơi (Mode 1v1)
             # Chỉ từ chối khi phòng đã đủ 2 người VÀ người mới không thuộc phòng
             if len(self.active_rooms[room_code]) >= 2 and user_id not in self.active_rooms[room_code]:
@@ -47,44 +39,55 @@ class ConnectionManager:
                 await websocket.close(code=4000, reason="Room is full")
                 return False
 
-            # Chấp nhận bắt tay (handshake)
+            # Lấy kết nối cũ (nếu cùng user_id vào lại từ tab/thiết bị khác)
+            old_ws = self.active_rooms[room_code].get(user_id)
+
+            # Chấp nhận bắt tay (handshake) và ghi đè kết nối mới vào pool
             await websocket.accept()
             self.active_rooms[room_code][user_id] = websocket
-            
-        # Phát tín hiệu JOIN_ROOM (bắn ra ngoài lock để không block hệ thống)
-        await self.broadcast(room_code, {
-            "event": "JOIN_ROOM",
-            "user_id": str(user_id),
-            "message": "A new player has joined the arena."
-        })
-        
+
+        # Đóng kết nối cũ SAU khi đã thay thế trong pool.
+        # Route của socket cũ sẽ gọi disconnect(..., old_ws) nhưng sẽ bị bỏ qua
+        # vì old_ws không còn là socket hiện tại.
+        if old_ws is not None:
+            try:
+                await old_ws.close(code=4001, reason="Replaced by new connection")
+            except Exception:
+                pass
+
         return True
 
-    async def disconnect(self, room_code: str, user_id: UUID):
+    async def disconnect(self, room_code: str, user_id: UUID, websocket: WebSocket) -> bool:
         """
         Ngắt kết nối, giải phóng Pool và xóa phòng an toàn.
+        Chỉ xóa nếu `websocket` đúng là kết nối hiện tại của user trong phòng.
         """
         async with self._lock:
-            if room_code in self.active_rooms:
-                # Gỡ bỏ websocket của người chơi
-                if user_id in self.active_rooms[room_code]:
-                    del self.active_rooms[room_code][user_id]
-                
-                # Gỡ trạng thái ready nếu có
-                if room_code in self.ready_players and user_id in self.ready_players[room_code]:
-                    self.ready_players[room_code].remove(user_id)
+            room = self.active_rooms.get(room_code)
+            if room is None:
+                return False
 
-                # Hủy tiến trình đếm ngược nếu có người thoát giữa chừng
-                if self.room_states.get(room_code) == 'COUNTING':
-                    self.room_states[room_code] = 'WAITING'
-                
-                # Tránh Memory Leak: Dọn dẹp key hoàn toàn nếu phòng trống
-                if len(self.active_rooms[room_code]) == 0:
-                    del self.active_rooms[room_code]
-                    if room_code in self.ready_players:
-                        del self.ready_players[room_code]
-                    if room_code in self.room_states:
-                        del self.room_states[room_code]
+            if room.get(user_id) is not websocket:
+                return False
+
+            # Gỡ bỏ websocket của người chơi
+            del room[user_id]
+
+            # Gỡ trạng thái ready nếu có
+            if room_code in self.ready_players:
+                self.ready_players[room_code].discard(user_id)
+
+            # Hủy tiến trình đếm ngược nếu có người thoát giữa chừng
+            if self.room_states.get(room_code) == 'COUNTING':
+                self.room_states[room_code] = 'WAITING'
+
+            # Tránh Memory Leak: Dọn dẹp key hoàn toàn nếu phòng trống
+            if len(room) == 0:
+                del self.active_rooms[room_code]
+                self.ready_players.pop(room_code, None)
+                self.room_states.pop(room_code, None)
+
+            return True
 
     async def broadcast(self, room_code: str, message_dict: dict):
         """
@@ -95,13 +98,13 @@ class ConnectionManager:
 
         # Lấy danh sách để tránh lỗi Dictionary changed size during iteration
         connections = list(self.active_rooms[room_code].items())
-        
+
         async def _send(uid: UUID, conn: WebSocket):
             try:
                 await conn.send_json(message_dict)
             except Exception:
-                # Gọi disconnect an toàn vì broadcast KHÔNG giữ _lock (tránh Deadlock)
-                await self.disconnect(room_code, uid)
+                # Truyền đúng `conn` để không xóã nhầm kết nối mới của cùng user
+                await self.disconnect(room_code, uid, conn)
 
         # Dùng asyncio.gather để gửi song song, không bị nghẽn nếu client khác treo
         tasks = [_send(uid, conn) for uid, conn in connections]
@@ -112,13 +115,51 @@ class ConnectionManager:
         """
         Gửi tín hiệu riêng cho một user cụ thể (VD: Kết quả Compile Error cá nhân).
         """
-        if room_code in self.active_rooms and user_id in self.active_rooms[room_code]:
-            connection = self.active_rooms[room_code][user_id]
-            try:
-                await connection.send_json(message_dict)
-            except Exception:
-                # Nếu gửi lỗi (do client đã ngắt kết nối đột ngột), tiến hành dọn dẹp an toàn
-                await self.disconnect(room_code, user_id)
+        connection = self.active_rooms.get(room_code, {}).get(user_id)
+        if connection is None:
+            return
+
+        try:
+            await connection.send_json(message_dict)
+        except Exception:
+            await self.disconnect(room_code, user_id, connection)
+
+    async def begin_countdown(self, room_code: str) -> bool:
+        async with self._lock:
+            if self.room_states.get(room_code) != "WAITING":
+                return False
+            self.room_states[room_code] = "COUNTING"
+            return True
+
+    async def cancel_countdown(self, room_code: str) -> None:
+        async with self._lock:
+            if self.room_states.get(room_code) == "COUNTING":
+                self.room_states[room_code] = "WAITING"
+
+    def is_counting(self, room_code: str) -> bool:
+        return self.room_states.get(room_code) == "COUNTING"
+
+    def track_task(self, task: asyncio.Task) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def confirm_match_start(self, room_code: str) -> bool:
+        """Chốt COUNTING -> PLAYING. Trả về False nếu countdown đã bị hủy."""
+        async with self._lock:
+            if self.room_states.get(room_code) != "COUNTING":
+                return False
+            self.room_states[room_code] = "PLAYING"
+            return True
+
+    async def sync_status(self, room_code: str, status: str) -> None:
+        """Đồng bộ state trong RAM với status phòng trên DB, không ghi đè countdown."""
+        async with self._lock:
+            if room_code not in self.room_states:
+                return
+            if status == "PLAYING":
+                self.room_states[room_code] = "PLAYING"
+            elif status == "WAITING" and self.room_states.get(room_code) != "COUNTING":
+                self.room_states[room_code] = "WAITING"
 
     async def handle_player_ready(self, room_code: str, user_id: UUID):
         """
@@ -127,11 +168,11 @@ class ConnectionManager:
         async with self._lock:
             if room_code in self.ready_players:
                 self.ready_players[room_code].add(user_id)
-                
+
                 # Kiểm tra đúng trạng thái WAITING và đủ 2 người mới đếm ngược
                 if len(self.ready_players[room_code]) == 2 and self.room_states.get(room_code) == 'WAITING':
                     self.room_states[room_code] = 'COUNTING'
-                    
+
                     # Lưu task vào _tasks set để tránh bị Garbage Collect
                     task = asyncio.create_task(self._trigger_countdown(room_code))
                     self._tasks.add(task)
@@ -142,20 +183,22 @@ class ConnectionManager:
         Tiến trình ngầm đếm ngược bắt đầu trận (Có cơ chế ngắt an toàn).
         """
         await self.broadcast(room_code, {"event": "PLAYER_READY", "status": "All players ready"})
-        
+
         for i in range(3, 0, -1):
             # Kiểm tra nếu state thay đổi (có người out) thì hủy countdown
             if self.room_states.get(room_code) != 'COUNTING':
                 await self.broadcast(room_code, {"event": "COUNTDOWN_ABORTED", "message": "Player disconnected. Waiting..."})
                 return
-                
+
             await self.broadcast(room_code, {"event": "COUNTDOWN", "value": i})
             await asyncio.sleep(1)
-            
+
         # Kiểm tra lần cuối trước khi chốt vào trận
         if self.room_states.get(room_code) == 'COUNTING':
             self.room_states[room_code] = 'PLAYING'
             await self.broadcast(room_code, {"event": "COUNTDOWN_START", "message": "Match Started!"})
+        else:
+            await self.broadcast(room_code, {"event": "COUNTDOWN_ABORTED", "message": "Player disconnected. Waiting..."})
 
     async def update_progress(self, room_code: str, user_id: UUID, passed_testcases: int, total_testcases: int):
         """
@@ -168,6 +211,7 @@ class ConnectionManager:
             "total": total_testcases,
             "progress_percent": round((passed_testcases / total_testcases) * 100, 2) if total_testcases > 0 else 0
         })
+
 
 # Khởi tạo Pool Connection duy nhất (Singleton Pattern)
 manager = ConnectionManager()

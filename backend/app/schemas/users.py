@@ -105,6 +105,9 @@ class UserProfileDashboardResponse(UserBaseResponse):
         return RankBadge.BRONZE
 
 
+TokenResponse.model_rebuild()
+
+
 # --- FR-1.4: Leaderboard ---
 class LeaderboardItemResponse(BaseModel):
     rank: int = Field(..., ge=1, le=100)

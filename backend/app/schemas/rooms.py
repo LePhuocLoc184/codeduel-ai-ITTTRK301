@@ -24,6 +24,10 @@ class CustomRoomCreateRequest(BaseModel):
     problem_set_id: UUID | None = None
 
 
+class JoinRoomRequest(BaseModel):
+    room_code: str = Field(..., min_length=6, max_length=6, description="Mã PIN 6 ký tự")
+
+
 # --- WebSocket Event Protocols (FR-2.3) ---
 class WSEventType(str, Enum):
     JOIN_ROOM = "JOIN_ROOM"

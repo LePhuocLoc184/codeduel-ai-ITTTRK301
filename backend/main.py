@@ -11,6 +11,9 @@ from app.schemas.response import BaseResponse
 from app.core.handlers import register_exception_handlers
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.core.config import settings
+from app.routers.arena import router as arena_router
+from app.routers.auth import router as auth_router
+from app.routers.matchmaking import router as matchmaking_router
 
 
 @asynccontextmanager
@@ -36,6 +39,10 @@ app = FastAPI(
 
 # đăng kí global exception
 register_exception_handlers(app)
+
+app.include_router(auth_router)
+app.include_router(arena_router)
+app.include_router(matchmaking_router)
 
 # thiết lập vùng trung gian giới hạn các Miền có thể gửi được Request đến BackEnd
 app.add_middleware(
