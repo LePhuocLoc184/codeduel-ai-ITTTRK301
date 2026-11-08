@@ -108,7 +108,7 @@ class ConnectionManager:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def send_personal(self, message_dict: dict, room_code: str, user_id: UUID):
+    async def send_personal(self, room_code: str, user_id: UUID, message_dict: dict):
         """
         Gửi tín hiệu riêng cho một user cụ thể (VD: Kết quả Compile Error cá nhân).
         """
@@ -117,6 +117,7 @@ class ConnectionManager:
             try:
                 await connection.send_json(message_dict)
             except Exception:
+                # Nếu gửi lỗi (do client đã ngắt kết nối đột ngột), tiến hành dọn dẹp an toàn
                 await self.disconnect(room_code, user_id)
 
     async def handle_player_ready(self, room_code: str, user_id: UUID):
