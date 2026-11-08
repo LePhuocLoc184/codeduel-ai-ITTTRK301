@@ -147,3 +147,23 @@ async def connect(self, websocket: WebSocket, room_code: str, user_id: UUID) -> 
     })
     
     return True
+
+async def disconnect(self, room_code: str, user_id: UUID):
+    """
+    Gỡ client khỏi phòng, tự động hủy phòng nếu không còn ai.
+    """
+    async with self._lock:
+        if room_code in self.active_rooms:
+            # Gỡ bỏ kết nối của người chơi khỏi phòng
+            if user_id in self.active_rooms[room_code]:
+                del self.active_rooms[room_code][user_id]
+            
+            # Gỡ bỏ trạng thái sẵn sàng (ready) của người chơi
+            if room_code in self.ready_players and user_id in self.ready_players[room_code]:
+                self.ready_players[room_code].remove(user_id)
+            
+            # Tự động dọn dẹp key room_code nếu phòng trống để tránh Memory Leak
+            if len(self.active_rooms[room_code]) == 0:
+                del self.active_rooms[room_code]
+                if room_code in self.ready_players:
+                    del self.ready_players[room_code]
