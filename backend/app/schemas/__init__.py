@@ -21,6 +21,7 @@ from app.schemas.rooms import (
     GameMode,
     RoomStatus,
     CustomRoomCreateRequest,
+    JoinRoomRequest,
     WSEventType,
     WSPayload,
     AIReviewReport,
