@@ -5,23 +5,26 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 class ConnectionManager:
     def __init__(self):
-        # Cấu trúc lưu trữ kết nối: room_code -> {user_id: WebSocket}
+        # State Connection Pool (Theo Mục 4 Sơ đồ Kiến trúc)
+        # Lưu trữ kết nối: room_code -> {user_id: WebSocket}
         self.active_rooms: Dict[str, Dict[UUID, WebSocket]] = {}
         
-        # Cấu trúc: room_code -> tập hợp (Set) chứa user_id của những người đã sẵn sàng
+        # Quản lý trạng thái Sẵn sàng của người chơi trong phòng
         self.ready_players: Dict[str, Set[UUID]] = {}
         
+        # Đảm bảo Thread-Safety / Async Safe
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, room_code: str, user_id: UUID) -> bool:
         """
-        Quản lý kết nối và giới hạn phòng đấu (AC 2.1 & FR-2.3)
+        Quản lý kết nối vào Arena.
         """
         async with self._lock:
             if room_code not in self.active_rooms:
                 self.active_rooms[room_code] = {}
                 self.ready_players[room_code] = set()
 
+            # Giới hạn phòng tối đa 2 người chơi (Mode 1v1)
             if len(self.active_rooms[room_code]) >= 2:
                 await websocket.accept()
                 await websocket.close(code=4000, reason="Room is full")
@@ -30,6 +33,7 @@ class ConnectionManager:
             await websocket.accept()
             self.active_rooms[room_code][user_id] = websocket
             
+        # Phát tín hiệu JOIN_ROOM
         await self.broadcast(room_code, {
             "event": "JOIN_ROOM",
             "user_id": str(user_id),
@@ -40,7 +44,7 @@ class ConnectionManager:
 
     async def disconnect(self, room_code: str, user_id: UUID):
         """
-        Quản lý ngắt kết nối và giải phóng bộ nhớ (AC 2.2)
+        Ngắt kết nối và giải phóng Pool.
         """
         async with self._lock:
             if room_code in self.active_rooms:
@@ -50,6 +54,7 @@ class ConnectionManager:
                 if room_code in self.ready_players and user_id in self.ready_players[room_code]:
                     self.ready_players[room_code].remove(user_id)
                 
+                # Tránh Memory Leak
                 if len(self.active_rooms[room_code]) == 0:
                     del self.active_rooms[room_code]
                     if room_code in self.ready_players:
@@ -57,8 +62,7 @@ class ConnectionManager:
 
     async def broadcast(self, room_code: str, message_dict: dict):
         """
-        Truyền phát tin nhắn JSON tới toàn bộ người chơi trong phòng (AC 3.1 & FR-2.3)
-        Sử dụng cho: PLAYER_TYPING, COUNTDOWN_START, GAME_OVER
+        Truyền phát tín hiệu Event chung (Typing, Game Over, Error).
         """
         if room_code not in self.active_rooms:
             return
@@ -73,7 +77,7 @@ class ConnectionManager:
 
     async def send_personal(self, message_dict: dict, room_code: str, user_id: UUID):
         """
-        Gửi tin nhắn riêng tư cho 1 người chơi cụ thể (AC 3.2)
+        Gửi tín hiệu riêng (VD: Kết quả Compile Error cá nhân).
         """
         if room_code in self.active_rooms and user_id in self.active_rooms[room_code]:
             connection = self.active_rooms[room_code][user_id]
@@ -84,8 +88,7 @@ class ConnectionManager:
 
     async def handle_player_ready(self, room_code: str, user_id: UUID):
         """
-        FR-2.3: Xử lý sự kiện PLAYER_READY.
-        Nếu cả 2 người cùng sẵn sàng, kích hoạt COUNTDOWN_START.
+        Xử lý sự kiện Ready & Kích hoạt đếm ngược.
         """
         async with self._lock:
             if room_code in self.ready_players:
@@ -96,14 +99,25 @@ class ConnectionManager:
 
     async def _trigger_countdown(self, room_code: str):
         """
-        Tiến trình ngầm đếm ngược 3-2-1 theo chuẩn FR-2.3 User Journey Bước 3
+        Tiến trình ngầm đếm ngược bắt đầu trận.
         """
         await self.broadcast(room_code, {"event": "PLAYER_READY", "status": "All players ready"})
-        
         for i in range(3, 0, -1):
             await self.broadcast(room_code, {"event": "COUNTDOWN", "value": i})
             await asyncio.sleep(1)
-            
         await self.broadcast(room_code, {"event": "COUNTDOWN_START", "message": "Match Started!"})
+
+    async def update_progress(self, room_code: str, user_id: UUID, passed_testcases: int, total_testcases: int):
+        """
+        HÀM MỚI BỔ SUNG: Cập nhật "Thanh máu / Tiến độ Real-time" 
+        (Dựa theo Mục 2.2 và Sơ đồ Kiến trúc Luồng 3 - Progress Event)
+        """
+        await self.broadcast(room_code, {
+            "event": "PROGRESS_UPDATE",
+            "user_id": str(user_id),
+            "passed": passed_testcases,
+            "total": total_testcases,
+            "progress_percent": round((passed_testcases / total_testcases) * 100, 2) if total_testcases > 0 else 0
+        })
 
 manager = ConnectionManager()
