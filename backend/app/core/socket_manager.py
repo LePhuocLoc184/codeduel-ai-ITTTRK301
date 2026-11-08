@@ -121,3 +121,29 @@ class ConnectionManager:
         })
 
 manager = ConnectionManager()
+
+async def connect(self, websocket: WebSocket, room_code: str, user_id: UUID) -> bool:
+    """
+    Chấp nhận kết nối WebSocket và thêm client vào phòng đấu.
+    Trả về True nếu kết nối thành công, False nếu phòng đã đầy.
+    """
+    async with self._lock:
+        if room_code not in self.active_rooms:
+            self.active_rooms[room_code] = {}
+            self.ready_players[room_code] = set()
+
+        if len(self.active_rooms[room_code]) >= 2:
+            await websocket.accept()
+            await websocket.close(code=4000, reason="Room is full")
+            return False
+
+        await websocket.accept()
+        self.active_rooms[room_code][user_id] = websocket
+        
+    await self.broadcast(room_code, {
+        "event": "JOIN_ROOM",
+        "user_id": str(user_id),
+        "message": "A new player has joined the arena."
+    })
+    
+    return True
