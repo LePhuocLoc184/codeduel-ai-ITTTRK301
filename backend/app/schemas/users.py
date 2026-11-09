@@ -21,14 +21,16 @@ class RankBadge(str, Enum):
 class UserRegisterSchema(BaseModel):
     username: str
     email: str
-    password: str = Field(..., min_length=8, description="Mật khẩu tối thiểu 8 ký tự")
+    password: str = Field(..., min_length=8,
+                          description="Mật khẩu tối thiểu 8 ký tự")
 
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, value: str) -> str:
         # Check ít nhất 1 chữ hoa
         if not any(char.isupper() for char in value):
-            raise ValueError("Mật khẩu phải chứa ít nhất 1 ký tự viết hoa (A-Z)")
+            raise ValueError(
+                "Mật khẩu phải chứa ít nhất 1 ký tự viết hoa (A-Z)")
 
         # Check ít nhất 1 chữ số
         if not any(char.isdigit() for char in value):
@@ -121,3 +123,9 @@ class LeaderboardItemResponse(BaseModel):
     rank_badge: RankBadge
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserUpdateSchema(BaseModel):
+    avatar_url: str | None = None
+    old_password: str | None = None
+    new_password: str | None = None
