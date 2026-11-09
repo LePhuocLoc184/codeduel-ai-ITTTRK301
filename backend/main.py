@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.routers.arena import router as arena_router
 from app.routers.auth import router as auth_router
 from app.routers.matchmaking import router as matchmaking_router
+from app.routers.users import router as user_router
 
 
 @asynccontextmanager
@@ -40,7 +41,9 @@ app = FastAPI(
 # đăng kí global exception
 register_exception_handlers(app)
 
+# đăng kí các router vào app
 app.include_router(auth_router)
+app.include_router(user_router)
 app.include_router(arena_router)
 app.include_router(matchmaking_router)
 
@@ -58,9 +61,6 @@ app.add_middleware(
 @app.get("/health", status_code=status.HTTP_200_OK)
 def check_health():
     return {"message": "Chào mừng bạn đến với Code Duel"}
-
-
-status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 # tạm thời để test các exception và baseResponse trả về nha ae
