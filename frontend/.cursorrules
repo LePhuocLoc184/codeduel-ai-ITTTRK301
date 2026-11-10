@@ -1,0 +1,23 @@
+# AGENT SKILLS & FRONTEND CODING RULES (CodeDuel AI)
+
+## 1. UI/UX Pro Max Standard
+
+- **Spacing:** Sử dụng hệ thống spacing 4px/8px (p-2, p-4, p-6, gap-4...). Tuyệt đối không dùng px lẻ như `padding: 13px`.
+- **Contrast & Colors:** Màu chữ và nền phải đạt chuẩn WCAG (chữ tối trên nền sáng hoặc chữ sáng trên nền tối rõ ràng). Ưu tiên màu Dark Mode chuyên nghiệp cho CodeDuel AI (Zinc/Slate/Gray sắc thái tối).
+- **Responsive:** Tất cả Layout phải responsive từ Mobile (sm), Tablet (md) đến Desktop (lg/xl) bằng Flexbox và Grid.
+
+## 2. Emil Design System Style
+
+- **Giao diện:** Phong cách Clean, Minimalist, Glassmorphism nhẹ (backdrop-blur), viền mỏng (`border border-white/10`).
+- **Components:** Các nút (Buttons), Thẻ (Cards), Ô nhập (Inputs) phải đồng bộ `rounded-xl` hoặc `rounded-lg`, hover effect mượt mà (`transition-all duration-200`).
+- **Typography:** Hierarchy chữ rõ ràng (Heading bold, body regular, subtext muted-foreground).
+
+## 3. Image-to-Code & Component Rules
+
+- Viết code bằng **React + TypeScript + Tailwind CSS**.
+- Khi chuyển đổi từ mockup/ảnh: Giữ đúng tỷ lệ, bố cục, icon (dùng `lucide-react`) và cấu trúc component sạch sẽ, chia nhỏ file.
+
+## 4. Animation Motion
+
+- Hiệu ứng chuyển động phải tự nhiên, mượt mà (dùng Framer Motion hoặc Tailwind Animate).
+- Đảm bảo micro-interactions cho nút bấm (`active:scale-95`), loading state, và transition giữa các trang.
