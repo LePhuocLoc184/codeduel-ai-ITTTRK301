@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.core.socket_manager import manager
-from app.db.database import AsyncSessionLocal, get_db, get_db_ws
+from app.db.database import AsyncSessionLocal, get_db
 from app.dependencies.auth import get_current_user, get_user_from_token
 from app.models import ProblemSet, Question, Room, RoomPlayer, User
 from app.schemas.response import BaseResponse
@@ -263,7 +263,7 @@ async def arena_websocket(
     websocket: WebSocket,
     room_code: str,
     token: str = Query(...),
-    db: AsyncSession = Depends(get_db_ws),
+    db: AsyncSession = Depends(get_db),
 ):
     code = room_code.strip().upper()
     user = await get_user_from_token(token, db)
