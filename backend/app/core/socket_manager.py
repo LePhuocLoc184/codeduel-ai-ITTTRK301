@@ -140,7 +140,11 @@ class ConnectionManager:
 
     def is_counting(self, room_code: str) -> bool:
         return self.room_states.get(room_code) == "COUNTING"
-
+    def connected_count(self, room_code: str) -> int:
+        """Số người đang kết nối WebSocket trong phòng."""
+        return len(self.active_rooms.get(room_code, {}))
+    
+    
     def track_task(self, task: asyncio.Task) -> None:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
