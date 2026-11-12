@@ -92,7 +92,31 @@ class ConnectionManager:
                 self.countdown_ids.pop(room_code, None)
 
             return previous_state
+    async def close_room(
+        self,
+        room_code: str,
+        message_dict: dict | None = None,
+        code: int = 4002,
+        reason: str = "Room closed",
+    ) -> None:
+        """Xóa phòng khỏi RAM, báo (nếu có) rồi đóng kết nối của những người còn lại."""
+        async with self._lock:
+            room = self.active_rooms.pop(room_code, {})
+            self.room_states.pop(room_code, None)
+            self.countdown_ids.pop(room_code, None)
+            connections = list(room.values())
 
+        async def _close(conn: WebSocket):
+            try:
+                if message_dict is not None:
+                    await conn.send_json(message_dict)
+                await conn.close(code=code, reason=reason)
+            except Exception:
+                pass
+
+        await asyncio.gather(*(_close(conn) for conn in connections))
+        
+        
     async def broadcast(self, room_code: str, message_dict: dict):
         """
         Truyền phát tín hiệu Event song song tới tất cả người chơi trong phòng.
