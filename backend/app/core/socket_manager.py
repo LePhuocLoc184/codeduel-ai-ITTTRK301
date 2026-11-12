@@ -138,8 +138,12 @@ class ConnectionManager:
             if self.room_states.get(room_code) == "COUNTING":
                 self.room_states[room_code] = "WAITING"
 
-    def is_counting(self, room_code: str) -> bool:
-        return self.room_states.get(room_code) == "COUNTING"
+    def is_counting(self, room_code: str, cid: int) -> bool:
+        return (
+            self.room_states.get(room_code) == "COUNTING"
+            and self.countdown_ids.get(room_code) == cid
+        )
+    
     def connected_count(self, room_code: str) -> int:
         """Số người đang kết nối WebSocket trong phòng."""
         return len(self.active_rooms.get(room_code, {}))
