@@ -1,159 +1,136 @@
-from datetime import datetime, timezone
+"""
+-> đặt tại: app/services/matchmaking.py  (thay bản cũ)
+
+Nghiệp vụ HÀNG ĐỢI tìm trận: vào hàng đợi, hủy, xem trạng thái.
+Không ghép cặp ở đây - việc ghép cặp là của matchmaking_worker.py (AC 3).
+"""
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.models import MatchmakingEntry, Room, RoomPlayer, User
-from app.services.room_service import generate_unique_room_code
+from app.services.room_service import get_active_room
 
-ELO_BASE_WINDOW = 200
-ELO_EXPAND_EVERY_SECONDS = 15
-ELO_EXPAND_STEP = 100
-ELO_MAX_WINDOW = 800
-
-
-def elo_window(created_at: datetime, now: datetime) -> int:
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    elapsed = max(0.0, (now - created_at).total_seconds())
-    steps = int(elapsed // ELO_EXPAND_EVERY_SECONDS)
-    return min(ELO_MAX_WINDOW, ELO_BASE_WINDOW + steps * ELO_EXPAND_STEP)
+GAME_MODE_RANKED = "RANKED_1V1"
+OPEN_ROOM_STATUSES = ("WAITING", "PLAYING")
+READY_COUNTDOWN_SECONDS = 5  # AC 4.3: thời gian chuẩn bị vào trận
 
 
-async def _searching_entry(db: AsyncSession, user_id: UUID) -> MatchmakingEntry | None:
-    stmt = select(MatchmakingEntry).where(
-        MatchmakingEntry.user_id == user_id,
-        MatchmakingEntry.status == "searching",
-    )
-    return (await db.execute(stmt)).scalars().first()
+def match_found_message(room_code: str, opponent: User) -> dict:
+    """Payload sự kiện MATCH_FOUND (AC 4.3), gửi cho một người chơi với `opponent` là đối thủ của họ."""
+    return {
+        "event": "MATCH_FOUND",
+        "data": {
+            "room_code": room_code,
+            "opponent": {
+                "username": opponent.username,
+                "avatar_url": opponent.avatar_url,
+                "rating": opponent.rating,
+            },
+            "countdown_seconds": READY_COUNTDOWN_SECONDS,
+        },
+    }
+
+
+async def join_queue(db: AsyncSession, user: User) -> MatchmakingEntry:
+    """AC 1: vào hàng đợi Ranked. Chỉ tạo entry, không ghép cặp."""
+    user_id = user.id
+
+    # AC 1.1: không được đang ở trong phòng chưa kết thúc
+    active_room = await get_active_room(db, user_id)
+    if active_room is not None:
+        raise ConflictException(
+            "Bạn đang ở trong một phòng đang hoạt động",
+            details={"room_id": str(active_room.id), "room_code": active_room.code},
+        )
+
+    # AC 1.2: Partial Unique Index uq_matchmaking_searching_user chặn bấm trùng
+    entry = MatchmakingEntry(user_id=user_id, game_mode=GAME_MODE_RANKED, status="searching")
+    db.add(entry)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise BadRequestException(
+            "Bạn đang trong hàng đợi tìm trận, vui lòng không gửi yêu cầu trùng lặp"
+        )
+
+    await db.refresh(entry)
+    return entry
 
 
 async def _open_matched_entry(db: AsyncSession, user_id: UUID) -> MatchmakingEntry | None:
+    """Entry đã matched mà phòng vẫn còn WAITING/PLAYING."""
     stmt = (
         select(MatchmakingEntry)
         .join(Room, Room.id == MatchmakingEntry.room_id)
         .where(
             MatchmakingEntry.user_id == user_id,
             MatchmakingEntry.status == "matched",
-            Room.status.in_(("WAITING", "PLAYING")),
+            Room.status.in_(OPEN_ROOM_STATUSES),
         )
         .order_by(MatchmakingEntry.matched_at.desc())
     )
     return (await db.execute(stmt)).scalars().first()
 
 
-async def _create_ranked_room(
-    db: AsyncSession,
-    left: MatchmakingEntry,
-    right: MatchmakingEntry,
-) -> Room:
-    now = datetime.now(timezone.utc)
-    host_id = left.user_id if left.created_at <= right.created_at else right.user_id
-    room = Room(
-        code=await generate_unique_room_code(db),
-        host_id=host_id,
-        game_mode="RANKED_1V1",
-        status="WAITING",
-    )
-    db.add(room)
-    await db.flush()
-
-    db.add_all([
-        RoomPlayer(room_id=room.id, user_id=left.user_id, is_ready=False),
-        RoomPlayer(room_id=room.id, user_id=right.user_id, is_ready=False),
-    ])
-    for entry in (left, right):
-        entry.status = "matched"
-        entry.room_id = room.id
-        entry.matched_at = now
-    await db.flush()
-    return room
-
-
-async def _try_pair(db: AsyncSession, entry: MatchmakingEntry, user: User) -> Room | None:
-    locked = (
+async def cancel_queue(db: AsyncSession, user_id: UUID) -> MatchmakingEntry:
+    """AC 2: hủy lượt tìm trận đang searching."""
+    # FOR UPDATE: nếu worker đang ghép đúng entry này thì chờ worker xong rồi đọc lại,
+    # lúc đó entry đã 'matched' và không còn khớp điều kiện 'searching'.
+    entry = (
         await db.execute(
             select(MatchmakingEntry)
-            .where(MatchmakingEntry.id == entry.id)
+            .where(
+                MatchmakingEntry.user_id == user_id,
+                MatchmakingEntry.status == "searching",
+            )
             .with_for_update()
         )
     ).scalars().first()
-    if locked is None or locked.status != "searching":
-        return None
 
-    now = datetime.now(timezone.utc)
-    my_window = elo_window(locked.created_at, now)
-    candidates = (
-        await db.execute(
-            select(MatchmakingEntry, User)
-            .join(User, User.id == MatchmakingEntry.user_id)
-            .where(
-                MatchmakingEntry.status == "searching",
-                MatchmakingEntry.game_mode == locked.game_mode,
-                MatchmakingEntry.user_id != user.id,
-            )
-            .order_by(MatchmakingEntry.created_at.asc())
-            .with_for_update(skip_locked=True)
-        )
-    ).all()
-
-    for candidate, opponent in candidates:
-        allowed = max(my_window, elo_window(candidate.created_at, now))
-        if abs(user.rating - opponent.rating) <= allowed:
-            return await _create_ranked_room(db, locked, candidate)
-    return None
-
-
-async def join_queue(db: AsyncSession, user: User, game_mode: str) -> MatchmakingEntry:
-    user_id = user.id
-    open_match = await _open_matched_entry(db, user_id)
-    if open_match is not None:
-        return open_match
-
-    entry = await _searching_entry(db, user_id)
     if entry is None:
-        entry = MatchmakingEntry(user_id=user_id, game_mode=game_mode, status="searching")
-        db.add(entry)
-        try:
-            await db.flush()
-        except IntegrityError:
-            await db.rollback()
-            existing = await _searching_entry(db, user_id)
-            if existing is None:
-                raise
-            rebound = await db.get(User, user_id)
-            if rebound is None:
-                raise
-            user = rebound
-            entry = existing
+        if await _open_matched_entry(db, user_id) is not None:
+            raise BadRequestException("Trận đấu đã được ghép, không thể hủy hàng đợi")
+        raise NotFoundException("Không tìm thấy hàng đợi tìm trận đang hoạt động")
 
-    await _try_pair(db, entry, user)
-    await db.commit()
-    await db.refresh(entry)
-    return entry
-
-
-async def cancel_queue(db: AsyncSession, user_id: UUID) -> MatchmakingEntry | None:
-    entry = await _searching_entry(db, user_id)
-    if entry is None:
-        return None
     entry.status = "cancelled"
     await db.commit()
     await db.refresh(entry)
     return entry
 
 
+async def get_queue_status(db: AsyncSession, user_id: UUID) -> MatchmakingEntry | None:
+    """Entry searching/matched mới nhất của user. matched chỉ tính khi phòng còn WAITING/PLAYING."""
+    entry = (
+        await db.execute(
+            select(MatchmakingEntry)
+            .where(
+                MatchmakingEntry.user_id == user_id,
+                MatchmakingEntry.status.in_(("searching", "matched")),
+            )
+            .order_by(MatchmakingEntry.created_at.desc())
+        )
+    ).scalars().first()
+    if entry is None:
+        return None
+    if entry.status == "matched":
+        room = await db.get(Room, entry.room_id) if entry.room_id else None
+        if room is None or room.status not in OPEN_ROOM_STATUSES:
+            return None
+    return entry
+
+
 async def opponent_for(db: AsyncSession, entry: MatchmakingEntry, user_id: UUID) -> User | None:
+    """Đối thủ trong phòng của entry, None nếu chưa ghép."""
     if entry.room_id is None:
         return None
     stmt = (
         select(User)
         .join(RoomPlayer, RoomPlayer.user_id == User.id)
-        .where(
-            RoomPlayer.room_id == entry.room_id,
-            RoomPlayer.user_id != user_id,
-        )
+        .where(RoomPlayer.room_id == entry.room_id, RoomPlayer.user_id != user_id)
     )
     return (await db.execute(stmt)).scalars().first()
