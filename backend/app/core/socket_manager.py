@@ -127,9 +127,11 @@ class ConnectionManager:
     async def begin_countdown(self, room_code: str) -> bool:
         async with self._lock:
             if self.room_states.get(room_code) != "WAITING":
-                return False
+                return None
             self.room_states[room_code] = "COUNTING"
-            return True
+            self._cid_counter += 1
+            self.countdown_ids[room_code] = self._cid_counter
+            return self._cid_counter
 
     async def cancel_countdown(self, room_code: str) -> None:
         async with self._lock:
