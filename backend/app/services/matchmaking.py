@@ -1,9 +1,4 @@
-"""
--> đặt tại: app/services/matchmaking.py  (thay bản cũ)
 
-Nghiệp vụ HÀNG ĐỢI tìm trận: vào hàng đợi, hủy, xem trạng thái.
-Không ghép cặp ở đây - việc ghép cặp là của matchmaking_worker.py (AC 3).
-"""
 from uuid import UUID
 
 from sqlalchemy import select
@@ -16,7 +11,7 @@ from app.services.room_service import get_active_room
 
 GAME_MODE_RANKED = "RANKED_1V1"
 OPEN_ROOM_STATUSES = ("WAITING", "PLAYING")
-READY_COUNTDOWN_SECONDS = 5  # AC 4.3: thời gian chuẩn bị vào trận
+READY_COUNTDOWN_SECONDS = 5
 
 
 def match_found_message(room_code: str, opponent: User) -> dict:
