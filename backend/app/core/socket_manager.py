@@ -118,39 +118,32 @@ class ConnectionManager:
         
         
     async def broadcast(self, room_code: str, message_dict: dict):
-        """
-        Truyền phát tín hiệu Event song song tới tất cả người chơi trong phòng.
-        """
-        if room_code not in self.active_rooms:
+        """Gửi song song tới tất cả người chơi trong phòng."""
+        room = self.active_rooms.get(room_code)
+        if not room:
             return
 
-        # Lấy danh sách để tránh lỗi Dictionary changed size during iteration
-        connections = list(self.active_rooms[room_code].items())
+        connections = list(room.values())
 
-        async def _send(uid: UUID, conn: WebSocket):
+        async def _send(conn: WebSocket):
             try:
                 await conn.send_json(message_dict)
             except Exception:
-                # Truyền đúng `conn` để không xóã nhầm kết nối mới của cùng user
-                await self.disconnect(room_code, uid, conn)
+                # Không gọi disconnect ở đây: route của socket này sẽ tự dọn
+                # khi nhận WebSocketDisconnect.
+                pass
 
-        # Dùng asyncio.gather để gửi song song, không bị nghẽn nếu client khác treo
-        tasks = [_send(uid, conn) for uid, conn in connections]
-        if tasks:
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*(_send(conn) for conn in connections))
 
     async def send_personal(self, room_code: str, user_id: UUID, message_dict: dict):
-        """
-        Gửi tín hiệu riêng cho một user cụ thể (VD: Kết quả Compile Error cá nhân).
-        """
+        """Gửi tin nhắn riêng cho một user."""
         connection = self.active_rooms.get(room_code, {}).get(user_id)
         if connection is None:
             return
-
         try:
             await connection.send_json(message_dict)
         except Exception:
-            await self.disconnect(room_code, user_id, connection)
+            pass
 
     async def begin_countdown(self, room_code: str) -> bool:
         async with self._lock:
