@@ -81,6 +81,11 @@ async def room_view(db: AsyncSession, room: Room) -> dict:
         "problem_set_id": str(room.problem_set_id) if room.problem_set_id else None,
         "question_id": str(room.question_id) if room.question_id else None,
         "started_at": room.started_at.isoformat() if room.started_at else None,
+        # GAME_OVER có thể bị bỏ lỡ khi mất mạng. Hai trường từ DB này giúp client
+        # đọc lại người thắng/thời điểm kết thúc qua trạng thái phòng khi kết nối lại.
+        # Đây là dữ liệu khôi phục trạng thái, không tự phát lại sự kiện GAME_OVER.
+        "winner_id": str(room.winner_id) if room.winner_id else None,
+        "finished_at": room.finished_at.isoformat() if room.finished_at else None,
         "players": await load_players(db, room.id),
         "question": question,
     }

@@ -61,7 +61,11 @@ async def get_user_history(
             RecentMatchItem(
                 room_id=room.id,
                 game_mode=room.game_mode,
-                is_win=game_helpers._is_decisive_win(me, mates),
+                # Dùng winner_id chính thức, kể cả trận Custom có elo_change = 0.
+                # Phòng cũ chưa có winner_id vẫn dùng cách suy luận từ Elo/score
+                # của game_helpers để giữ khả năng hiển thị lịch sử trước migration.
+                is_win=(room.winner_id == user_id if room.winner_id is not None
+                        else game_helpers._is_decisive_win(me, mates)),
                 elo_change=me.elo_change,
                 finished_at=room.finished_at,
             )
