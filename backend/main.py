@@ -1,6 +1,7 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from app.db.database import engine
 from app.models import Base
 
@@ -16,6 +17,7 @@ from app.routers.auth import router as auth_router
 from app.routers.matchmaking import router as matchmaking_router
 from app.routers.users import router as user_router
 from app.routers.runner import router as runner_router
+from app.services.matchmaking_worker import matchmaking_worker
 
 
 @asynccontextmanager
@@ -26,9 +28,17 @@ async def lifespan(app: FastAPI):
         # tạo bảng bất đồng bộ
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Đã khởi tạo các bảng thành công!")
-
+    
+    worker_task = asyncio.create_task(matchmaking_worker())
+    print("⚡ Đã khởi chạy Matchmaking Background Worker!")
+    
     yield
-
+    
+    print("🛑 Đang dừng Matchmaking Background Worker...")
+    worker_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await worker_task
+        
     # --- CHẠY KHI TẮT SERVER (SHUTDOWN) ---
     print("🛑 Đang đóng kết nối Database...")
     await engine.dispose()
