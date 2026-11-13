@@ -28,6 +28,13 @@ class Room(Base):
     host_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    # winner_id lưu kết quả chính thức, không suy đoán người thắng từ điểm Elo.
+    # NULL khi chưa có người thắng hoặc là bản ghi cũ trước migration.
+    # SET NULL giữ lại phòng khi tài khoản người thắng bị xóa.
+    # Giá trị được ghi cùng transaction với Submission, thống kê và điểm Elo.
+    winner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     problem_set_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("problem_sets.id", ondelete="SET NULL"), nullable=True, default=None
     )
@@ -40,6 +47,8 @@ class Room(Base):
     status: Mapped[str] = mapped_column(
         String(20), default="WAITING", server_default="WAITING", nullable=False
     )
+    # Chốt đánh dấu đã xử lý kết quả trận, kiểm tra cùng status dưới khóa DB.
+    # Service hiện đặt True cả trận Custom dù Custom không cộng/trừ rating.
     rating_applied: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
@@ -57,7 +66,9 @@ class Room(Base):
     )
 
     # Relationships
-    host: Mapped["User"] = relationship("User", back_populates="hosted_rooms")
+    # Room có hai khóa ngoại về User (host_id và winner_id), nên phải chỉ rõ
+    # quan hệ host dùng host_id để SQLAlchemy không nhầm với người thắng.
+    host: Mapped["User"] = relationship("User", back_populates="hosted_rooms", foreign_keys=[host_id])
     problem_set: Mapped["ProblemSet | None"] = relationship(
         "ProblemSet", back_populates="rooms"
     )

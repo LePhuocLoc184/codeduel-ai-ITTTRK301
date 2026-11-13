@@ -17,6 +17,8 @@ from app.routers.auth import router as auth_router
 from app.routers.matchmaking import router as matchmaking_router
 from app.routers.users import router as user_router
 from app.routers.runner import router as runner_router
+# Router Execute điều phối chấm bài/DB, dùng lại phần lưu file và compile của Runner.
+from app.routers.execute import router as execute_router
 from app.services.matchmaking_worker import matchmaking_worker
 
 
@@ -59,6 +61,9 @@ app.include_router(arena_router)
 app.include_router(matchmaking_router)
 # AC 1: Đăng ký API nhận mã nguồn/ngôn ngữ và lưu file vào code_backup.
 app.include_router(runner_router)
+# Mở POST /api/v1/execute/run và /submit; từng endpoint tự yêu cầu JWT.
+# Việc đăng ký router không chạy code hoặc ghi Submission khi server khởi động.
+app.include_router(execute_router)
 
 # thiết lập vùng trung gian giới hạn các Miền có thể gửi được Request đến BackEnd
 app.add_middleware(
