@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class SubmissionLanguage(str, Enum):
+    # AC 1.2: Chấp nhận cả c và cpp khi nhận mã nguồn.
+    C = "c"
     CPP = "cpp"
     PYTHON = "python"
     JAVA = "java"

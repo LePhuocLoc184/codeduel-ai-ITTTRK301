@@ -77,3 +77,6 @@ htmlcov/
 # ==========================================
 # Giữ lại folder alembic/ và alembic/versions/, chỉ ignore cache nếu có
 alembic/versions/__pycache__/
+
+# AC 1: Bỏ qua các thư mục mã nguồn tạm do người dùng gửi lên.
+code_backup/sandbox_*/

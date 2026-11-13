@@ -16,6 +16,7 @@ from app.routers.arena import router as arena_router
 from app.routers.auth import router as auth_router
 from app.routers.matchmaking import router as matchmaking_router
 from app.routers.users import router as user_router
+from app.routers.runner import router as runner_router
 from app.services.matchmaking_worker import matchmaking_worker
 
 
@@ -56,6 +57,8 @@ app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(arena_router)
 app.include_router(matchmaking_router)
+# AC 1: Đăng ký API nhận mã nguồn/ngôn ngữ và lưu file vào code_backup.
+app.include_router(runner_router)
 
 # thiết lập vùng trung gian giới hạn các Miền có thể gửi được Request đến BackEnd
 app.add_middleware(
