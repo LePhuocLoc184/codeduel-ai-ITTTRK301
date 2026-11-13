@@ -104,7 +104,7 @@ async def test_validation_request(user_id: int):
     return BaseResponse(data={"user_id": user_id})
 
 
-# thất bại lỗi từ server
+# thất bại lỗi từ servergit
 @app.post("/test/server-error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 async def test_server_error():
     return 1 / 0
