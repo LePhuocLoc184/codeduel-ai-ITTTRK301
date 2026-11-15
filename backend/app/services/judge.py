@@ -1,165 +1,167 @@
-"""Thực thi và chấm testcase, dùng chung cho Run và Submit.
+"""Chấm code: lưu/compile -> evaluate_testcases -> dừng ở testcase lỗi đầu tiên.
 
-judge_code() lưu/compile một lần, rồi gọi run_case() cho từng testcase.
-Service execute.py chọn testcase public hay toàn bộ; module này không tự chọn
-testcase, không truy cập DB, không quyết định thắng trận hoặc cộng điểm Elo.
-
-Lưu ý: subprocess chạy với quyền của server. Thư mục riêng và lấy mẫu tài nguyên
-chưa tạo thành sandbox bảo mật để cô lập hoàn toàn code không đáng tin cậy.
+Runner chỉ xử lý file và compiler; evaluator chạy testcase, chuẩn hóa output
+và trả số đo theo ms/MB. Service execute.py chọn testcase và ghi dữ liệu DB.
 """
-import os
+import json
+import math
 import subprocess
 import sys
-import time
 from contextlib import suppress
 from pathlib import Path
-from tempfile import TemporaryFile
 from uuid import UUID
 
 import psutil
 
-from app.services.runner import save_code_file, compile_code, _sanitize_compile_error
+from app.services.execution_worker import kill_and_wait
 
 
 def run_case(command: list[str], directory: Path, stdin: str,
-             time_limit: float, memory_limit: int) -> dict:
-    """Chạy một testcase, trả stdout, lỗi, thời gian (giây) và RAM (MB).
-
-    command là danh sách đối số chạy Python/Java/binary; directory là thư mục
-    riêng của lượt nộp; stdin chứa input của testcase. time_limit/memory_limit
-    áp dụng cho mỗi case, không phải tổng tất cả case.
-
-    PASS ở hàm này chỉ có nghĩa tiến trình thoát bình thường. judge_code()
-    còn phải đối chiếu stdout với đáp án mới xác nhận testcase thực sự đạt.
-    """
-    # perf_counter đo khoảng thời gian trôi qua, gồm cả khởi động tiến trình.
-    # Đây là thời gian thực tế, không phải số giây CPU sử dụng riêng cho code.
-    started = time.perf_counter()
-    peak_memory = 0.0
-    status, error = "PASS", None
-    # Ghi sẵn input rồi đưa con trỏ về đầu để chương trình đọc từ byte đầu tiên.
-    # Output/error đi vào file tạm thay vì pipe có bộ đệm hữu hạn dễ gây kẹt.
-    # Ba file này tự đóng/xóa khi rời with; file mã nguồn vẫn được giữ ở code_backup.
-    with TemporaryFile() as inp, TemporaryFile() as out, TemporaryFile() as err:
-        inp.write(stdin.encode("utf-8"))
-        inp.seek(0)
-        # cwd giúp chương trình tìm file trong lượt chạy; không giới hạn được quyền
-        # đọc/ghi ra ngoài thư mục này. command dạng list không cần shell=True.
-        process = subprocess.Popen(command, cwd=directory, stdin=inp, stdout=out, stderr=err)
-        # Giữ lại các tiến trình đã quan sát để đo RAM và dọn khi kết thúc testcase.
-        tracked = {}
+             time_limit: float = 2.0, memory_limit: int = 128) -> dict:
+    """Chạy một testcase qua worker độc lập để dùng preexec_fn an toàn trên Linux."""
+    worker_path = Path(__file__).with_name("execution_worker.py")
+    request = {
+        "command": command, "directory": str(directory), "stdin": stdin,
+        "time_limit": time_limit, "memory_limit_mb": memory_limit,
+    }
+    worker = subprocess.Popen(
+        [sys.executable, str(worker_path)], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    try:
+        # Timeout chấm THỰC SỰ nằm trong subprocess.run của worker = time_limit.
+        # 5 giây thêm chỉ để worker khởi động/dọn con; không cộng vào số đo testcase.
+        stdout, stderr = worker.communicate(json.dumps(request), timeout=time_limit + 5)
+    except subprocess.TimeoutExpired:
+        # Đây là worker bị kẹt, không phải lỗi TLE của bài làm. Thu hồi worker
+        # và các con còn sống, rồi báo lỗi hạ tầng thay vì công nhận bài đã chạy.
+        # Worker có thể vừa thoát ngay khi timeout xảy ra; vẫn phải thu hồi nó.
         try:
-            # Chương trình rất ngắn có thể đã thoát trước lần lấy thông tin đầu tiên.
-            root = None
             with suppress(psutil.NoSuchProcess):
-                root = psutil.Process(process.pid)
-                tracked[root.pid] = root
-            while process.poll() is None:
-                with suppress(psutil.NoSuchProcess):
-                    for child in root.children(recursive=True) if root else []:
-                        tracked[child.pid] = child
-                # RSS là lượng RAM vật lý tiến trình đang chiếm. Cộng RAM của
-                # tiến trình chính và các tiến trình con đã theo dõi, đổi byte -> MB.
-                rss = 0
-                for child in tracked.values():
-                    with suppress(psutil.NoSuchProcess):
-                        rss += child.memory_info().rss
-                # Đây là đỉnh RAM QUAN SÁT ĐƯỢC: lấy mẫu có thể bỏ sót đỉnh rất ngắn.
-                peak_memory = max(peak_memory, rss / (1024 * 1024))
-                if peak_memory > memory_limit:
-                    status, error = "MLE", "Vượt giới hạn bộ nhớ"
-                    break
-                if time.perf_counter() - started > time_limit:
-                    status, error = "TLE", "Vượt giới hạn thời gian"
-                    break
-                # Nếu tổng stdout + stderr quan sát được vượt 1 MB, dừng testcase.
-                # Kiểm tra định kỳ nên đây không phải hạn mức cứng ở cấp hệ điều hành.
-                if os.fstat(out.fileno()).st_size + os.fstat(err.fileno()).st_size > 1024 * 1024:
-                    status, error = "RUNTIME_ERROR", "Output vượt giới hạn 1 MB"
-                    break
-                # Chờ 5 ms giữa các lần lấy mẫu để tránh vòng lặp chiếm toàn bộ CPU.
-                time.sleep(0.005)
+                kill_and_wait(psutil.Process(worker.pid).children(recursive=True))
         finally:
-            # finally chạy cả khi hoàn thành bình thường lẫn khi bị ngắt do lỗi.
-            # Dọn các tiến trình con đã thấy; tiến trình tạo/thoát giữa hai lần lấy
-            # mẫu có thể không được theo dõi, nên đây chưa thay thế sandbox hệ điều hành.
-            for child in reversed(list(tracked.values())):
-                with suppress(psutil.NoSuchProcess):
-                    child.kill()
-            if process.poll() is None:
-                process.kill()
-            # Chờ tiến trình chính được thu hồi trước khi đọc file output/error.
-            process.wait()
-        elapsed = time.perf_counter() - started
-        # Giới hạn cả phần đọc vào RAM; errors='replace' tránh lỗi giải mã output
-        # không phải UTF-8 làm hỏng toàn bộ request chấm bài.
-        out.seek(0)
-        err.seek(0)
-        actual = out.read(1024 * 1024).decode("utf-8", errors="replace")
-        stderr = err.read(1024 * 1024).decode("utf-8", errors="replace")
-        if status == "PASS" and process.returncode != 0:
-            status, error = "RUNTIME_ERROR", stderr or f"Mã thoát: {process.returncode}"
-            # JVM/Python có thể tự báo hết bộ nhớ trước lần lấy mẫu RSS kế tiếp.
-            # Nhận diện theo chuỗi stderr chỉ là suy đoán, không phải số đo chắc chắn.
-            if "java.lang.OutOfMemoryError" in stderr or "MemoryError" in stderr or "std::bad_alloc" in stderr:
-                status, error = "MLE", "Chương trình không cấp phát được bộ nhớ"
-        # Làm sạch đường dẫn trong lỗi runtime bằng helper đang dùng cho lỗi compile.
-        # 'source' chỉ là tên placeholder để helper lấy directory, không tạo thêm file.
-        return {"status": status, "actual_output": actual,
-                "execution_time": elapsed, "memory_used": peak_memory,
-                "error_message": _sanitize_compile_error(error, directory / "source") if error else None}
+            if worker.poll() is None:
+                worker.kill()
+            worker.communicate()
+        return {"status": "RUNTIME_ERROR", "actual_output": "",
+                "execution_time_ms": 0.0, "memory_used_mb": 0.0,
+                "error_message": "Worker không phản hồi trong thời hạn"}
+    if worker.returncode != 0:
+        return {"status": "RUNTIME_ERROR", "actual_output": "",
+                "execution_time_ms": 0.0, "memory_used_mb": 0.0,
+                "error_message": "Worker không thể chạy testcase"}
+    return json.loads(stdout)
+
+
+def evaluate_testcases(command: list[str], directory: Path | str,
+                       test_cases: list[dict], time_limit: float = 2.0,
+                       memory_limit_mb: int = 128) -> dict:
+    """AC 3/4: chấm danh sách JSON, trả kết quả tổng hợp và chi tiết case public.
+
+    passed_count là số case đúng trước lỗi đầu tiên; total_count luôn là tổng
+    số case của đề, kể cả các case chưa chạy. execution_time_ms lấy MAX giữa
+    các case đã chạy, memory_used_mb cũng lấy MAX. Danh sách results là phần
+    bổ sung cho Console của API Run; tuyệt đối không chứa dữ liệu hidden case.
+    """
+    if not math.isfinite(time_limit) or time_limit <= 0 or memory_limit_mb <= 0:
+        raise ValueError("Giới hạn thời gian và bộ nhớ phải lớn hơn 0")
+    summary = {
+        "status": "FAIL",
+        "passed_count": 0,
+        "total_count": len(test_cases),
+        "execution_time_ms": 0.0,
+        "memory_used_mb": 0.0,
+        "error_message": None,
+        "results": [],
+    }
+    if not test_cases:
+        # Không cho trường hợp 0/0 được công nhận PASS và thắng trận.
+        summary["error_message"] = "Bài toán chưa có testcase"
+        return summary
+
+    for index, case in enumerate(test_cases, start=1):
+        # AC 3.1: mỗi input được đưa nguyên vẹn vào stdin của một tiến trình mới.
+        result = run_case(command, Path(directory), case["input"], time_limit, memory_limit_mb)
+        # AC 3.2: chỉ bỏ khoảng trắng ở HAI ĐẦU, giữ nguyên khoảng trắng bên trong.
+        # Ví dụ " 3\\n" khớp "3", nhưng "1  2" không khớp "1 2".
+        passed = (result["status"] == "PASS"
+                  and result["actual_output"].strip() == case["expected_output"].strip())
+        if result["status"] == "PASS" and not passed:
+            result["status"] = "FAIL"
+            result["error_message"] = f"Sai kết quả ở testcase {index}"
+
+        summary["execution_time_ms"] = max(summary["execution_time_ms"], result["execution_time_ms"])
+        summary["memory_used_mb"] = max(summary["memory_used_mb"], result["memory_used_mb"])
+
+        # Dữ liệu chi tiết chỉ được đưa ra nếu is_hidden đúng bằng False.
+        # Thiếu cờ cũng coi là hidden; stderr có thể chứa input do người chơi in ra.
+        if case.get("is_hidden") is False:
+            from app.services.runner import _sanitize_compile_error
+
+            if result["error_message"]:
+                result["error_message"] = _sanitize_compile_error(
+                    result["error_message"], Path(directory) / "source",
+                )
+            summary["results"].append({
+                "input": case["input"], "expected_output": case["expected_output"],
+                "actual_output": result["actual_output"], "passed": passed,
+                "status": result["status"], "error_message": result["error_message"],
+                "execution_time_ms": result["execution_time_ms"],
+                "memory_used_mb": result["memory_used_mb"],
+            })
+        elif result["error_message"]:
+            # Không trả traceback/output của hidden case qua trường lỗi tổng hợp.
+            result["error_message"] = {
+                "FAIL": "Sai kết quả ở testcase ẩn",
+                "TLE": "Testcase ẩn vượt giới hạn thời gian",
+                "MLE": "Testcase ẩn vượt giới hạn bộ nhớ",
+                "RUNTIME_ERROR": "Lỗi thực thi ở testcase ẩn",
+            }.get(result["status"], "Không chấm được testcase ẩn")
+
+        if not passed:
+            # AC 1.4/4.2: dừng ngay với FAIL, TLE, MLE hoặc RUNTIME_ERROR.
+            # Giữ số case đã đạt; không tính các case chưa được chạy là đã PASS.
+            summary["status"] = result["status"]
+            summary["error_message"] = result["error_message"]
+            return summary
+        summary["passed_count"] += 1
+
+    # Chỉ đi tới đây khi mọi case đều đã chạy thành công và đúng đáp án.
+    if summary["passed_count"] == summary["total_count"]:
+        summary["status"] = "PASS"
+    return summary
 
 
 def judge_code(code_content: str, language: str, user_id: UUID,
-               cases: list[dict], time_limit: float, memory_limit: int) -> dict:
-    """Trả kết quả tổng hợp của bài nộp và danh sách chi tiết từng testcase.
+               cases: list[dict], time_limit: float = 2.0, memory_limit: int = 128) -> dict:
+    """Nối bước lưu file/compile với evaluator, trả cùng cấu trúc ms/MB cho service."""
+    from app.services.runner import save_code_file, compile_code
 
-    status: PASS/FAIL/TLE/MLE/COMPILE_ERROR/RUNTIME_ERROR.
-    execution_time: tổng giây chạy các case, không tính compile.
-    memory_used: đỉnh RAM quan sát được lớn nhất giữa các case, không cộng dồn.
-    results: có input/output nên service chỉ đưa danh sách này ra client khi Run.
-    """
-    # Khởi tạo FAIL để danh sách testcase rỗng không thể được tính là PASS.
-    summary = {"status": "FAIL", "passed_test_cases": 0, "total_test_cases": len(cases),
-               "execution_time": 0.0, "memory_used": 0.0, "error_message": None, "results": []}
+    summary = {
+        "status": "FAIL", "passed_count": 0, "total_count": len(cases),
+        "execution_time_ms": 0.0, "memory_used_mb": 0.0,
+        "error_message": None, "results": [],
+    }
     if not cases:
         summary["error_message"] = "Bài toán chưa có testcase"
         return summary
     try:
-        # Dùng UUID người đăng nhập để lưu file; chỉ compile một lần cho cả bộ case.
         path = save_code_file(code_content, language, user_id)
         compiled = compile_code(path, language)
         if compiled["status"] == "COMPILE_ERROR":
-            # Lỗi compile thì dừng trước vòng lặp; chưa có testcase nào được chạy.
             summary.update(status="COMPILE_ERROR", error_message=compiled["error"])
             return summary
-        # Python dùng interpreter hiện tại; -I bỏ một số ảnh hưởng môi trường Python,
-        # không chặn truy cập file/network. Java dùng thư mục class qua -cp;
-        # -Xmx chỉ giới hạn heap, còn RSS đo cả bộ nhớ JVM. C/C++ chạy binary đã build.
-        command = ([sys.executable, "-I", str(path)] if language == "python" else
-                   ["java", f"-Xmx{memory_limit}m", "-cp", str(path.parent), "Main"] if language == "java" else
-                   [compiled["executable_path"]])
-        summary["status"] = "PASS"
-        for case in cases:
-            # Mỗi case khởi chạy một tiến trình mới, không tái sử dụng trạng thái RAM.
-            result = run_case(command, path.parent, case["input"], time_limit, memory_limit)
-            # So sánh token: "1 2" và "1\n2" được xem là giống nhau.
-            # Không có sai số số thực: token "1.0" khác "1.00".
-            passed = result["status"] == "PASS" and result["actual_output"].split() == case["expected_output"].split()
-            # Chạy bình thường nhưng sai đáp án -> FAIL; giữ nguyên TLE/MLE/lỗi chạy.
-            if result["status"] == "PASS" and not passed:
-                result["status"] = "FAIL"
-            result.update(input=case["input"], expected_output=case["expected_output"], passed=passed)
-            summary["results"].append(result)
-            summary["passed_test_cases"] += int(passed)
-            summary["execution_time"] += result["execution_time"]
-            summary["memory_used"] = max(summary["memory_used"], result["memory_used"])
-            # Tiếp tục các case sau để đếm đầy đủ. Một khi đã gặp TLE/MLE/RUNTIME_ERROR
-            # thì giữ lỗi đó làm trạng thái tổng; case PASS sau không xóa lỗi trước.
-            if not passed and summary["status"] in ("PASS", "FAIL"):
-                summary["status"] = result["status"]
-                summary["error_message"] = result["error_message"]
-    except (OSError, ValueError, psutil.Error):
-        # Lỗi lưu file/khởi chạy/đo tiến trình: trả lỗi tổng quát, không lộ đường dẫn máy chủ.
-        summary.update(status="RUNTIME_ERROR", error_message="Không thể khởi chạy chương trình")
-    return summary
+        if language == "python":
+            command = [sys.executable, "-I", str(path)]
+        elif language == "java":
+            # -Xmx giới hạn heap; RLIMIT_AS trên Linux giới hạn toàn bộ không gian
+            # địa chỉ của JVM. Với mức thấp (như 128 MB), JVM có thể không khởi động.
+            command = ["java", f"-Xmx{memory_limit}m", "-cp", str(path.parent), "Main"]
+        else:
+            command = [compiled["executable_path"]]
+        return evaluate_testcases(command, path.parent, cases, time_limit, memory_limit)
+    except (OSError, ValueError, subprocess.SubprocessError, psutil.Error):
+        # Lỗi hạ tầng/file/worker không được đổi thành PASS hay lộ đường dẫn server.
+        summary.update(status="RUNTIME_ERROR", error_message="Không thể khởi chạy bộ chấm")
+        return summary

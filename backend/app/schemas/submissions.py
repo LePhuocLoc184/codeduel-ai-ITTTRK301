@@ -40,21 +40,32 @@ class PublicTestCaseResult(BaseModel):
     """Một dòng kết quả để frontend hiển thị Console khi chạy thử.
 
     passed là kết quả đối chiếu đáp án; status cho biết PASS/FAIL/TLE/MLE/...
-    để phân biệt sai đáp án với lỗi thực thi. execution_time có đơn vị giây.
+    để phân biệt sai đáp án với lỗi thực thi. execution_time giữ đơn vị giây
+    cho client cũ; execution_time_ms là số đo mili-giây cho Console mới.
     """
     input: str
     expected_output: str
     actual_output: str | None = None
     passed: bool
     execution_time: float | None = None
+    execution_time_ms: float = Field(0.0, ge=0)
+    memory_used_mb: float = Field(0.0, ge=0)
     status: SubmissionStatus = SubmissionStatus.FAIL
     error_message: str | None = None
 
 
 class CodeRunResponse(BaseModel):
-    """Kết quả tổng của Run và danh sách chi tiết chỉ gồm testcase công khai."""
+    """Kết quả Run; results chỉ chứa các case public đã chạy trước khi dừng.
+
+    total_count gồm cả case chưa chạy; execution_time_ms là thời gian lớn nhất
+    trong các case đã chạy. Gặp case sai/lỗi thì không chạy các case còn lại.
+    """
     status: SubmissionStatus
     results: list[PublicTestCaseResult]
+    passed_count: int = Field(0, ge=0)
+    total_count: int = Field(0, ge=0)
+    execution_time_ms: float = Field(0.0, ge=0)
+    memory_used_mb: float = Field(0.0, ge=0)
     # Lỗi compile nằm ở cấp bài nộp, khi đó chưa có testcase nào được thực thi.
     compile_error_message: str | None = None
     # Trường chung cho thông báo lỗi tổng hợp; có thể dùng cho nhiều loại lỗi.
@@ -77,8 +88,9 @@ class SubmissionResponse(BaseModel):
     """Lịch sử của một bài nộp hợp lệ, kể cả khi code compile/chạy thất bại.
 
     Không chứa input/expected_output/actual_output của hidden testcase.
-    execution_time là tổng giây chạy testcase; memory_used là đỉnh RAM quan sát
-    được theo MB. error_message có thể rỗng khi chỉ bị sai đáp án (FAIL).
+    execution_time giữ đơn vị giây của DB; bài nộp mới lưu thời gian lớn nhất
+    trong các case đã chạy. memory_used là đỉnh RAM theo MB. Bản ghi cũ có thể
+    vẫn lưu tổng thời gian theo cách chấm trước đây, không tự chuyển đổi dữ liệu.
     """
     id: UUID
     room_id: UUID

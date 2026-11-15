@@ -65,7 +65,13 @@ async def run_code(payload: CodeRunRequest, user_id: UUID) -> CodeRunResponse:
     # results chỉ chứa testcase công khai; lỗi compile không có kết quả chạy case.
     # Trạng thái chấm FAIL/TLE/... vẫn là dữ liệu của HTTP 200, không phải lỗi API.
     return CodeRunResponse(
-        status=result["status"], results=result["results"],
+        # Giữ execution_time theo giây cho client cũ; thêm trường ms tường minh.
+        status=result["status"], results=[
+            dict(case, execution_time=case["execution_time_ms"] / 1000)
+            for case in result["results"]
+        ],
+        passed_count=result["passed_count"], total_count=result["total_count"],
+        execution_time_ms=result["execution_time_ms"], memory_used_mb=result["memory_used_mb"],
         compile_error_message=result["error_message"] if result["status"] == "COMPILE_ERROR" else None,
         error_message=result["error_message"],
     )
@@ -193,18 +199,20 @@ async def submit_code(payload: SubmissionCreateRequest, user_id: UUID) -> Submis
             submission = Submission(
                 room_id=room.id, user_id=user_id, question_id=payload.question_id,
                 code_content=payload.code_content, language=payload.language.value,
-                status=result["status"], passed_test_cases=result["passed_test_cases"],
-                total_test_cases=result["total_test_cases"], execution_time=result["execution_time"],
-                memory_used=result["memory_used"], error_message=error,
+                # DB cũ lưu giây/MB: đổi ms -> giây một lần tại ranh giới ghi DB.
+                # Giá trị mới là thời gian MAX của các case đã chạy, không phải tổng.
+                status=result["status"], passed_test_cases=result["passed_count"],
+                total_test_cases=result["total_count"], execution_time=result["execution_time_ms"] / 1000,
+                memory_used=result["memory_used_mb"], error_message=error,
             )
             db.add(submission)
             player = await db.scalar(select(RoomPlayer).where(
                 RoomPlayer.room_id == room.id, RoomPlayer.user_id == user_id))
             # Giữ thành tích tốt nhất trong trận; bài nộp tệ hơn không làm giảm score.
-            player.score = max(player.score, result["passed_test_cases"])
+            player.score = max(player.score, result["passed_count"])
             # Cần đồng thời PASS, có testcase và đạt đủ tất cả case mới chốt thắng.
-            if (result["status"] == "PASS" and result["total_test_cases"] > 0
-                    and result["passed_test_cases"] == result["total_test_cases"]):
+            if (result["status"] == "PASS" and result["total_count"] > 0
+                    and result["passed_count"] == result["total_count"]):
                 event = await _finish_game(db, room, user_id)
             # flush gửi INSERT/UPDATE xuống DB và nhận id/created_at của Submission,
             # nhưng chưa commit. Lỗi flush hoặc tạo response vẫn rollback transaction.
