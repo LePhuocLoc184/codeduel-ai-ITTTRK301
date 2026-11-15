@@ -1,4 +1,3 @@
-frontend/node_modules/
-backend/__pycache__/
-frontend/dist/
+node_modules/
+dist/
 .env
