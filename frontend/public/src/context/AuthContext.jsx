@@ -47,6 +47,12 @@ export function AuthProvider({ children }) {
     return data.data.user
   }
   const logout = () => { clearSession(); setUser(null) }
-  return <AuthContext.Provider value={{ user, loading, login, register, logout }}>{children}</AuthContext.Provider>
+  // Gộp thông tin mới (vd. avatar_url sau khi PUT /users/me) vào user đang đăng nhập và cache lại.
+  const updateUser = (patch) => {
+    const next = { ...user, ...patch }
+    localStorage.setItem("user", JSON.stringify(next))
+    setUser(next)
+  }
+  return <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>{children}</AuthContext.Provider>
 }
 export const useAuth = () => useContext(AuthContext)
