@@ -62,6 +62,7 @@ class RoomResponse(BaseModel):
     question_id: UUID | None = None
     game_mode: GameMode
     status: RoomStatus
+    is_draw: bool = False
     rating_applied: bool = False
     ai_review: AIReviewReport | None = None
     created_at: datetime
