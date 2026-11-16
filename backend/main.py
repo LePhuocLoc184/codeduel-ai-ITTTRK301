@@ -1,6 +1,7 @@
+import asyncio
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from app.db.database import engine
 from app.models import Base
 
@@ -15,6 +16,10 @@ from app.routers.arena import router as arena_router
 from app.routers.auth import router as auth_router
 from app.routers.matchmaking import router as matchmaking_router
 from app.routers.users import router as user_router
+from app.routers.runner import router as runner_router
+# Router Execute điều phối chấm bài/DB, dùng lại phần lưu file và compile của Runner.
+from app.routers.execute import router as execute_router
+from app.services.matchmaking_worker import matchmaking_worker
 
 
 @asynccontextmanager
@@ -25,9 +30,17 @@ async def lifespan(app: FastAPI):
         # tạo bảng bất đồng bộ
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Đã khởi tạo các bảng thành công!")
-
+    
+    worker_task = asyncio.create_task(matchmaking_worker())
+    print("⚡ Đã khởi chạy Matchmaking Background Worker!")
+    
     yield
-
+    
+    print("🛑 Đang dừng Matchmaking Background Worker...")
+    worker_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await worker_task
+        
     # --- CHẠY KHI TẮT SERVER (SHUTDOWN) ---
     print("🛑 Đang đóng kết nối Database...")
     await engine.dispose()
@@ -46,6 +59,11 @@ app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(arena_router)
 app.include_router(matchmaking_router)
+# AC 1: Đăng ký API nhận mã nguồn/ngôn ngữ và lưu file vào code_backup.
+app.include_router(runner_router)
+# Mở POST /api/v1/execute/run và /submit; từng endpoint tự yêu cầu JWT.
+# Việc đăng ký router không chạy code hoặc ghi Submission khi server khởi động.
+app.include_router(execute_router)
 
 # thiết lập vùng trung gian giới hạn các Miền có thể gửi được Request đến BackEnd
 app.add_middleware(
@@ -91,7 +109,7 @@ async def test_validation_request(user_id: int):
     return BaseResponse(data={"user_id": user_id})
 
 
-# thất bại lỗi từ server
+# thất bại lỗi từ servergit
 @app.post("/test/server-error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 async def test_server_error():
     return 1 / 0

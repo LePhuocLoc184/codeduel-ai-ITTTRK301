@@ -51,8 +51,10 @@ class User(Base):
     )
 
     # Relationships
+    # Chỉ những phòng user làm chủ; Room.winner_id cũng trỏ tới users nhưng
+    # không thuộc quan hệ này. foreign_keys phải khớp cấu hình Room.host.
     hosted_rooms: Mapped[list["Room"]] = relationship(
-        "Room", back_populates="host"
+        "Room", back_populates="host", foreign_keys="Room.host_id"
     )
     created_problem_sets: Mapped[list["ProblemSet"]] = relationship(
         "ProblemSet", back_populates="creator"
