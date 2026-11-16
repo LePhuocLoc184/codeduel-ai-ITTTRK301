@@ -350,13 +350,15 @@ async def arena_websocket(
                         manager.track_task(asyncio.create_task(start_countdown(code, room.id, cid)))
                 continue
             if action == "player_typing":
-                await manager.broadcast(code, {
-                    "event": "PLAYER_TYPING",
-                    "data": {
-                        "user_id": str(user.id),
-                        "is_typing": bool(data.get("is_typing", True)),
-                    },
-                })
+                # AC 1.3: Lọc lấy UUID của đối thủ đang kết nối trong phòng
+                room_clients = manager.active_rooms.get(code, {})
+                for uid in room_clients.keys():
+                    if uid != user.id:
+                        # Gửi đích danh tin nhắn siêu nhẹ OPPONENT_TYPING tới đối thủ
+                        await manager.send_personal(code, uid, {
+                            "event": "OPPONENT_TYPING",
+                            "data": {"is_typing": bool(data.get("is_typing", True))}
+                        })
                 continue
             await manager.send_personal(code, user.id, {
                 "event": "ERROR",

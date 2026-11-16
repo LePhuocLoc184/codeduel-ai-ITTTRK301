@@ -21,6 +21,8 @@ from app.models import Question, Room, RoomPlayer, User, Submission
 from app.schemas.submissions import CodeRunRequest, CodeRunResponse, SubmissionCreateRequest, SubmissionResponse
 from app.services.elo import calculate_elo
 from app.services.judge import judge_code
+from app.services.match_timer import cancel_match_timer        # dòng import 
+
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +160,8 @@ async def _finish_game(db, room: Room, winner_id: UUID) -> dict:
 async def _broadcast_game_over(room_code: str, event: dict) -> None:
     """Đồng bộ trạng thái Socket trong tiến trình hiện tại rồi gửi kết quả trận."""
     # Phát ngay sau commit; kết nối chậm không giữ HTTP request vô hạn.
+    cancel_match_timer(room_code)
+    await manager.sync_status(room_code, "FINISHED")
     await manager.sync_status(room_code, "FINISHED")
     try:
         # 0.1 giây là thời hạn CHỜ GỬI, không bảo đảm client nhận trong 100 ms.
