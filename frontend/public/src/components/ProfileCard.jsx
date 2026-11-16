@@ -25,7 +25,8 @@ export default function ProfileCard() {
   }, [user?.id])
 
   if (!user) return null
-  const data = profile?.id === user.id ? { ...user, ...profile } : user
+  // avatar_url lấy từ user (được cập nhật ngay sau khi đổi ảnh) thay vì bản profile đã tải trước đó.
+  const data = profile?.id === user.id ? { ...user, ...profile, avatar_url: user.avatar_url } : user
   const rating = Number(data.rating ?? 1200)
   const rank = String(data.rank_badge || rankBadgeFor(rating)).toUpperCase()
   const winRate = Math.min(100, Math.max(0, Number(data.win_rate ?? winRateFor(data.wins ?? 0, data.rated_games ?? 0))))
