@@ -24,3 +24,168 @@
 .account-actions{display:flex;align-items:center;gap:12px}.button-ghost{background:transparent;color:#c3c8ce;border:1px solid var(--line)}.button-ghost:hover{background:#171b1f;color:#fff}.button:disabled:not([aria-busy]){cursor:not-allowed}
 .form-success{font-size:10px;line-height:1.6;color:#b9e68a;background:#1b2519;border:1px solid #33412d;padding:9px 10px;border-radius:4px}
 @media(max-width:600px){.account-head{padding:16px}.account-body{padding:16px}.account-tabs button{padding:10px 7px;font-size:10px}.account-row{flex-wrap:wrap}.user-chip-button{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.room-arena-page {
+  width: min(1500px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.code-editor-panel {
+  margin-top: 22px;
+  border: 1px solid #272d31;
+  background: #0d1013;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.code-editor-header {
+  min-height: 58px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  border-bottom: 1px solid #272d31;
+}
+
+.code-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.code-editor-question {
+  color: #e4e7e9;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-editor-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-editor-settings select {
+  min-width: 95px;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid #343a3f;
+  border-radius: 5px;
+  background: #15191d;
+  color: #dce1e5;
+  font-size: 11px;
+  outline: none;
+}
+
+.code-editor-settings select:focus {
+  border-color: #8fc84d;
+}
+
+.editor-reset-button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #343a3f;
+  border-radius: 5px;
+  background: #15191d;
+  color: #c5cbd0;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.editor-reset-button:hover {
+  border-color: #8fc84d;
+  color: #ffffff;
+}
+
+.editor-toolbar {
+  height: 32px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid #20252a;
+  background: #111418;
+  color: #6f7982;
+  font: 9px var(--mono);
+}
+
+.editor-toolbar span:first-child {
+  color: #a8df69;
+}
+
+.monaco-wrapper {
+  width: 100%;
+  background: #1e1e1e;
+}
+
+.reset-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.reset-confirm {
+  width: min(390px, calc(100% - 40px));
+  padding: 22px;
+  border: 1px solid #343a3f;
+  border-radius: 8px;
+  background: #111518;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.7);
+}
+
+.reset-confirm h3 {
+  margin: 0 0 10px;
+  color: #ffffff;
+  font-size: 16px;
+}
+
+.reset-confirm p {
+  margin: 0;
+  color: #8e979f;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.reset-confirm-actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.reset-confirm-actions .button {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .room-arena-page {
+    width: calc(100% - 24px);
+  }
+
+  .code-editor-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .code-editor-settings {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .editor-toolbar {
+    gap: 10px;
+    overflow: auto;
+    white-space: nowrap;
+  }
+}
