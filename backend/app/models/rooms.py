@@ -52,6 +52,10 @@ class Room(Base):
     rating_applied: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Trận kết thúc do hết giờ mà không ai PASS (kết quả Hòa). Khi True thì winner_id luôn NULL.
+    is_draw: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     ai_review: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, default=None  # FR-4.2: Lưu Post-Match AI Review JSON
     )
