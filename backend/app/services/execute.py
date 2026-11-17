@@ -9,6 +9,7 @@ gì và lúc nào được công nhận người thắng.
 """
 import asyncio
 import logging
+import math
 from uuid import UUID
 
 from sqlalchemy import select, func
@@ -48,9 +49,13 @@ async def _question_data(db, question_id: UUID, public_only: bool) -> tuple:
     if not cases:
         # Không được coi 0/0 testcase là PASS rồi công nhận chiến thắng.
         raise BadRequestException("Bài toán chưa có testcase phù hợp để chấm")
-    if question.time_limit <= 0 or question.memory_limit <= 0:
+    # Dùng đúng giới hạn của đề; chỉ dùng mặc định khi chưa có giá trị.
+    # Không dùng `value or default`: giá trị 0 là cấu hình sai, phải báo lỗi.
+    seconds = question.time_limit if question.time_limit is not None else 2.0
+    megabytes = question.memory_limit if question.memory_limit is not None else 128
+    if not math.isfinite(seconds) or seconds <= 0 or megabytes <= 0:
         raise BadRequestException("Giới hạn thời gian/bộ nhớ của bài toán không hợp lệ")
-    return cases, question.time_limit, question.memory_limit
+    return cases, seconds, megabytes
 
 
 async def run_code(payload: CodeRunRequest, user_id: UUID) -> CodeRunResponse:
