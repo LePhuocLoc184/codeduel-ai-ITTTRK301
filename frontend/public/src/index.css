@@ -189,3 +189,277 @@
     white-space: nowrap;
   }
 }
+/* ===== Đấu trường thi đấu: layout 3 cột (3 / 6 / 3 trên lưới 12 cột) ===== */
+.arena-page.room-arena-playing {
+  width: calc(100% - 32px);
+  max-width: 1680px;
+  min-height: 0;
+  padding: 12px 0;
+}
+
+.room-arena-playing .arena-message {
+  margin: 0 0 8px;
+}
+
+.arena-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+  /* Trừ topbar (76px), footer (69px) và padding trang (24px) để vừa khít một màn hình. */
+  height: calc(100dvh - 76px - 69px - 24px);
+  min-height: 520px;
+}
+
+.arena-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.arena-col-left { grid-column: span 3; }
+.arena-col-center { grid-column: span 6; }
+.arena-col-right { grid-column: span 3; }
+
+.panel-label {
+  font: 500 9px var(--mono);
+  letter-spacing: 1px;
+  color: #717a83;
+}
+
+/* --- Cột trái: đề bài + testcase mẫu --- */
+.problem-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #272d31;
+  border-radius: 8px;
+  background: #0d1013;
+  overflow: hidden;
+}
+
+.problem-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.problem-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #20252a;
+}
+
+.problem-title {
+  margin: 0;
+  font: 600 18px/1.3 var(--display);
+  color: #ffffff;
+}
+
+.problem-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.difficulty-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  font: 600 10px var(--mono);
+}
+
+.difficulty-easy { color: #7ee07e; background: #14261a; border-color: #2c5a37; }
+.difficulty-medium { color: #f2c35b; background: #2a2412; border-color: #5e5028; }
+.difficulty-hard { color: #ff7b7b; background: #2b1616; border-color: #653030; }
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid #272d31;
+  border-radius: 999px;
+  background: #13171c;
+  color: #aab2b9;
+  font: 10px var(--mono);
+}
+
+.markdown-body {
+  color: #c5cbd0;
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 18px 0 8px; color: #ffffff; font-family: var(--display); line-height: 1.3; }
+.markdown-body h1 { font-size: 16px; }
+.markdown-body h2 { font-size: 15px; }
+.markdown-body h3 { font-size: 13px; color: #b4f566; }
+.markdown-body p { margin: 0 0 12px; }
+.markdown-body ul, .markdown-body ol { margin: 0 0 12px; padding-left: 20px; }
+.markdown-body li { margin-bottom: 4px; }
+.markdown-body code { padding: 1px 6px; border-radius: 4px; background: #1a1f24; color: #d7ef9f; font: 12px var(--mono); }
+.markdown-body pre { margin: 0 0 12px; padding: 10px 12px; overflow-x: auto; border: 1px solid #272d31; border-radius: 6px; background: #0a0c0f; }
+.markdown-body pre code { padding: 0; background: none; color: #d6dbe0; }
+.markdown-body strong { color: #ffffff; }
+
+.sample-cases {
+  flex: none;
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #272d31;
+  background: #0b0e11;
+}
+
+.sample-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #20252a;
+}
+
+.sample-tabs .panel-label { margin-right: auto; }
+
+.sample-tabs button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #2b3136;
+  border-radius: 6px;
+  background: transparent;
+  color: #8e979f;
+  font: 10px var(--mono);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sample-tabs button:hover { color: #ffffff; border-color: #44505a; }
+.sample-tabs button.active { color: #0d1013; background: var(--green); border-color: var(--green); }
+
+.sample-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.sample-body small { display: block; margin-bottom: 4px; font: 9px var(--mono); letter-spacing: 1px; color: #717a83; }
+.sample-body pre { margin: 0; padding: 8px 10px; overflow-x: auto; border: 1px solid #272d31; border-radius: 6px; background: #0a0c0f; color: #d6dbe0; font: 12px/1.6 var(--mono); }
+.sample-empty { margin: 0; padding: 14px 12px; color: #717a83; font-size: 11px; }
+
+/* --- Cột giữa: editor chiếm phần còn lại, console cố định bên dưới --- */
+.arena-col-center .code-editor-panel {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.arena-col-center .code-editor-header,
+.arena-col-center .editor-toolbar { flex: none; }
+
+.arena-col-center .monaco-wrapper {
+  flex: 1;
+  min-height: 0;
+}
+
+.arena-col-center .monaco-wrapper > section { height: 100%; }
+
+.console-panel {
+  flex: 0 0 clamp(120px, 26%, 220px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #272d31;
+  border-radius: 8px;
+  background: #0d1013;
+  overflow: hidden;
+}
+
+.console-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #20252a;
+  color: #717a83;
+}
+
+.console-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  color: #6f7982;
+  font: 12px/1.7 var(--mono);
+}
+
+/* --- Cột phải: đối thủ, đồng hồ, trạng thái gõ, sự kiện --- */
+.arena-sidebar {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-card {
+  flex: none;
+  border: 1px solid #272d31;
+  border-radius: 8px;
+  background: #0d1013;
+  overflow: hidden;
+}
+
+.side-card:last-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.side-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #20252a;
+  color: #717a83;
+}
+
+.side-card-body {
+  padding: 12px 14px;
+  color: #8e979f;
+  font-size: 12px;
+  overflow-y: auto;
+}
+
+/* --- Responsive: dưới 1024px xếp dọc, trang được phép cuộn --- */
+@media (max-width: 1023px) {
+  .arena-grid {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
+
+  .arena-col-left,
+  .arena-col-center,
+  .arena-col-right { grid-column: auto; }
+
+  .arena-col-left .problem-panel { max-height: 70vh; }
+  .arena-col-center .code-editor-panel { flex: none; height: 520px; }
+  .console-panel { flex: none; height: 200px; }
+  .arena-sidebar { flex: none; }
+}
+
+@media (max-width: 600px) {
+  .arena-page.room-arena-playing { width: calc(100% - 20px); }
+}

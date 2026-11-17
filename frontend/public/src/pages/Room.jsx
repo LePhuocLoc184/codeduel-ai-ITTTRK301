@@ -11,6 +11,9 @@ import {
 import Editor from "@monaco-editor/react"
 import api from "../api/axios"
 import { useAuth } from "../context/AuthContext"
+import ProblemPanel from "../components/arena/ProblemPanel"
+import ConsolePanel from "../components/arena/ConsolePanel"
+import ArenaSidebar from "../components/arena/ArenaSidebar"
 
 const languageMap = {
   cpp: "cpp",
@@ -39,8 +42,12 @@ export default function Room() {
 
   const [language, setLanguage] = useState("cpp")
   const [theme, setTheme] = useState("vs-dark")
-  const [code, setCode] = useState("")
+  // Mỗi ngôn ngữ giữ code riêng để đổi qua lại không mất bài đang gõ.
+  const [codes, setCodes] = useState({ cpp: "", python: "", java: "" })
+  const loadedQuestionRef = useRef(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+
+  const code = codes[language] ?? ""
 
   useEffect(() => {
     if (loading || !user) return undefined
@@ -55,10 +62,6 @@ export default function Room() {
 
         const roomData = data.data
         setRoom(roomData)
-
-        if (roomData.question?.starter_code?.cpp) {
-          setCode(roomData.question.starter_code.cpp)
-        }
 
         const token = localStorage.getItem("token")
 
@@ -104,16 +107,6 @@ export default function Room() {
 
             if (message.event === "ROOM_STATE") {
               setRoom(message.data)
-
-              if (
-                message.data?.question?.starter_code?.[
-                  language
-                ]
-              ) {
-                setCode(
-                  message.data.question.starter_code[language],
-                )
-              }
             }
 
             if (
@@ -165,13 +158,6 @@ export default function Room() {
                       }
                     : current,
                 )
-
-                const starter =
-                  message.data.question?.starter_code?.[language]
-
-                if (starter) {
-                  setCode(starter)
-                }
               }
             }
 
@@ -206,23 +192,29 @@ export default function Room() {
     }
   }, [roomCode, user, loading])
 
+  // Chỉ nạp starter_code khi đổi sang câu hỏi mới (lần đầu vào trận / bắt đầu trận),
+  // không nạp lại mỗi khi room cập nhật qua socket để tránh xóa code đang gõ.
   useEffect(() => {
-    if (!room?.question?.starter_code) return
+    const starter = room?.question?.starter_code
+    const questionId = room?.question?.id
 
-    const starter =
-      room.question.starter_code[language]
+    if (!starter || !questionId) return
+    if (loadedQuestionRef.current === questionId) return
 
-    if (starter !== undefined) {
-      setCode(starter)
-    }
-  }, [language, room])
+    loadedQuestionRef.current = questionId
+    setCodes({
+      cpp: starter.cpp ?? "",
+      python: starter.python ?? "",
+      java: starter.java ?? "",
+    })
+  }, [room?.question])
 
   const handleEditorMount = (editor) => {
     editorRef.current = editor
   }
 
   const handleEditorChange = (value) => {
-    setCode(value || "")
+    setCodes((current) => ({ ...current, [language]: value || "" }))
   }
 
   const changeLanguage = (newLanguage) => {
@@ -234,12 +226,21 @@ export default function Room() {
       room?.question?.starter_code?.[language]
 
     if (starter !== undefined) {
-      setCode(starter)
-      setShowResetConfirm(false)
+      const editor = editorRef.current
+      const model = editor?.getModel()
 
-      if (editorRef.current) {
-        editorRef.current.setValue(starter)
+      if (editor && model) {
+        // executeEdits giữ lịch sử Undo, người chơi vẫn Ctrl+Z để lấy lại code cũ.
+        editor.pushUndoStop()
+        editor.executeEdits("reset-code", [
+          { range: model.getFullModelRange(), text: starter },
+        ])
+        editor.pushUndoStop()
+      } else {
+        setCodes((current) => ({ ...current, [language]: starter }))
       }
+
+      setShowResetConfirm(false)
     }
   }
 
@@ -281,6 +282,7 @@ export default function Room() {
   )
 
   const question = room?.question
+  const isPlaying = room?.status === "PLAYING" && Boolean(question)
 
   if (!user && !loading) {
     return (
@@ -300,7 +302,10 @@ export default function Room() {
   }
 
   return (
-    <section className="arena-page room-arena-page">
+    <section
+      className={`arena-page room-arena-page${isPlaying ? " room-arena-playing" : ""}`}
+    >
+      {!isPlaying && (
       <div className="arena-heading">
         <Link
           className="watch-link"
@@ -325,6 +330,7 @@ export default function Room() {
             : "Đang kết nối với phòng…"}
         </p>
       </div>
+      )}
 
       {error && (
         <div
@@ -436,176 +442,190 @@ export default function Room() {
             </div>
           )}
 
-          {room.status === "PLAYING" &&
-            question && (
-              <div className="code-editor-panel">
-                <div className="code-editor-header">
-                  <div className="code-editor-title">
-                    <span className="feature-index">
-                      {question.difficulty ||
-                        "THỬ THÁCH"}
-                    </span>
+          {isPlaying && (
+            <div className="arena-grid">
+              <aside className="arena-col arena-col-left">
+                <ProblemPanel question={question} />
+              </aside>
 
-                    <span className="code-editor-question">
-                      {question.title}
-                    </span>
-                  </div>
+              <div className="arena-col arena-col-center">
+                <div className="code-editor-panel">
+                  <div className="code-editor-header">
+                    <div className="code-editor-title">
+                      <span className="feature-index">
+                        {question.difficulty ||
+                          "THỬ THÁCH"}
+                      </span>
 
-                  <div className="code-editor-settings">
-                    <select
-                      value={language}
-                      onChange={(event) =>
-                        changeLanguage(
-                          event.target.value,
-                        )
-                      }
-                    >
-                      <option value="cpp">
-                        C++
-                      </option>
+                      <span className="code-editor-question">
+                        {question.title}
+                      </span>
+                    </div>
 
-                      <option value="python">
-                        Python
-                      </option>
+                    <div className="code-editor-settings">
+                      <select
+                        value={language}
+                        onChange={(event) =>
+                          changeLanguage(
+                            event.target.value,
+                          )
+                        }
+                      >
+                        <option value="cpp">
+                          C++
+                        </option>
 
-                      <option value="java">
-                        Java
-                      </option>
-                    </select>
+                        <option value="python">
+                          Python
+                        </option>
 
-                    <select
-                      value={theme}
-                      onChange={(event) =>
-                        setTheme(
-                          event.target.value,
-                        )
-                      }
-                    >
-                      <option value="vs-dark">
-                        Dark
-                      </option>
+                        <option value="java">
+                          Java
+                        </option>
+                      </select>
 
-                      <option value="light">
-                        Light
-                      </option>
-                    </select>
+                      <select
+                        value={theme}
+                        onChange={(event) =>
+                          setTheme(
+                            event.target.value,
+                          )
+                        }
+                      >
+                        <option value="vs-dark">
+                          Dark
+                        </option>
 
-                    <button
-                      type="button"
-                      className="editor-reset-button"
-                      onClick={() =>
-                        setShowResetConfirm(
-                          true,
-                        )
-                      }
-                    >
-                      <RotateCcw size={14} />
-                      Reset Code
-                    </button>
-                  </div>
-                </div>
+                        <option value="light">
+                          Light
+                        </option>
+                      </select>
 
-                <div className="editor-toolbar">
-                  <span>
-                    {languageNames[
-                      language
-                    ]}
-                  </span>
-
-                  <span>
-                    Ctrl+/ comment
-                  </span>
-
-                  <span>
-                    Tab = 4 spaces
-                  </span>
-
-                  <span>
-                    Ctrl+F tìm kiếm
-                  </span>
-                </div>
-
-                <div className="monaco-wrapper">
-                  <Editor
-                    height="calc(100vh - 300px)"
-                    language={
-                      languageMap[
-                        language
-                      ]
-                    }
-                    theme={theme}
-                    value={code}
-                    onChange={
-                      handleEditorChange
-                    }
-                    onMount={
-                      handleEditorMount
-                    }
-                    options={{
-                      fontSize: 14,
-                      minimap: {
-                        enabled: false,
-                      },
-                      automaticLayout:
-                        true,
-                      tabSize: 4,
-                      insertSpaces: true,
-                      wordWrap: "on",
-                      scrollBeyondLastLine:
-                        false,
-                      suggestOnTriggerCharacters:
-                        true,
-                      quickSuggestions: true,
-                      formatOnPaste: true,
-                      formatOnType: false,
-                      padding: {
-                        top: 12,
-                      },
-                    }}
-                  />
-                </div>
-
-                {showResetConfirm && (
-                  <div className="reset-confirm-overlay">
-                    <div className="reset-confirm">
-                      <h3>
-                        Reset Code?
-                      </h3>
-
-                      <p>
-                        Toàn bộ code hiện tại
-                        sẽ được thay bằng
-                        starter code ban đầu.
-                      </p>
-
-                      <div className="reset-confirm-actions">
-                        <button
-                          type="button"
-                          className="button-ghost"
-                          onClick={() =>
-                            setShowResetConfirm(
-                              false,
-                            )
-                          }
-                        >
-                          Hủy
-                        </button>
-
-                        <button
-                          type="button"
-                          className="button"
-                          onClick={
-                            resetCode
-                          }
-                        >
-                          Reset Code
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        className="editor-reset-button"
+                        onClick={() =>
+                          setShowResetConfirm(
+                            true,
+                          )
+                        }
+                      >
+                        <RotateCcw size={14} />
+                        Reset Code
+                      </button>
                     </div>
                   </div>
-                )}
+
+                  <div className="editor-toolbar">
+                    <span>
+                      {languageNames[
+                        language
+                      ]}
+                    </span>
+
+                    <span>
+                      Ctrl+/ comment
+                    </span>
+
+                    <span>
+                      Tab = 4 spaces
+                    </span>
+
+                    <span>
+                      Ctrl+F tìm kiếm
+                    </span>
+                  </div>
+
+                  <div className="monaco-wrapper">
+                    <Editor
+                      height="100%"
+                      path={`${question.id}-${language}`}
+                      language={
+                        languageMap[
+                          language
+                        ]
+                      }
+                      theme={theme}
+                      value={code}
+                      onChange={
+                        handleEditorChange
+                      }
+                      onMount={
+                        handleEditorMount
+                      }
+                      options={{
+                        fontSize: 14,
+                        minimap: {
+                          enabled: false,
+                        },
+                        automaticLayout:
+                          true,
+                        tabSize: 4,
+                        insertSpaces: true,
+                        wordWrap: "on",
+                        scrollBeyondLastLine:
+                          false,
+                        suggestOnTriggerCharacters:
+                          true,
+                        quickSuggestions: true,
+                        formatOnPaste: true,
+                        formatOnType: false,
+                        padding: {
+                          top: 12,
+                        },
+                      }}
+                    />
+                  </div>
+
+                  {showResetConfirm && (
+                    <div className="reset-confirm-overlay">
+                      <div className="reset-confirm">
+                        <h3>
+                          Reset Code?
+                        </h3>
+
+                        <p>
+                          Toàn bộ code hiện tại
+                          sẽ được thay bằng
+                          starter code ban đầu.
+                        </p>
+
+                        <div className="reset-confirm-actions">
+                          <button
+                            type="button"
+                            className="button-ghost"
+                            onClick={() =>
+                              setShowResetConfirm(
+                                false,
+                              )
+                            }
+                          >
+                            Hủy
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button"
+                            onClick={
+                              resetCode
+                            }
+                          >
+                            Reset Code
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <ConsolePanel />
               </div>
-            )}
+
+              <aside className="arena-col arena-col-right">
+                <ArenaSidebar />
+              </aside>
+            </div>
+          )}
         </>
       )}
     </section>
