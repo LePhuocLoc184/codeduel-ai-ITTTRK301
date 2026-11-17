@@ -15,6 +15,22 @@ import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
 import ArenaSidebar from "../components/arena/ArenaSidebar"
 
+// Giữ cố định tham chiếu: nếu tạo object mới mỗi lần render, Monaco sẽ updateOptions sau mỗi phím gõ.
+const EDITOR_OPTIONS = {
+  fontSize: 14,
+  minimap: { enabled: false },
+  automaticLayout: true,
+  tabSize: 4,
+  insertSpaces: true,
+  wordWrap: "on",
+  scrollBeyondLastLine: false,
+  suggestOnTriggerCharacters: true,
+  quickSuggestions: true,
+  formatOnPaste: true,
+  formatOnType: false,
+  padding: { top: 12 },
+}
+
 const languageMap = {
   cpp: "cpp",
   python: "python",
@@ -553,27 +569,7 @@ export default function Room() {
                       onMount={
                         handleEditorMount
                       }
-                      options={{
-                        fontSize: 14,
-                        minimap: {
-                          enabled: false,
-                        },
-                        automaticLayout:
-                          true,
-                        tabSize: 4,
-                        insertSpaces: true,
-                        wordWrap: "on",
-                        scrollBeyondLastLine:
-                          false,
-                        suggestOnTriggerCharacters:
-                          true,
-                        quickSuggestions: true,
-                        formatOnPaste: true,
-                        formatOnType: false,
-                        padding: {
-                          top: 12,
-                        },
-                      }}
+                      options={EDITOR_OPTIONS}
                     />
                   </div>
 

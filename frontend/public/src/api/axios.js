@@ -69,6 +69,10 @@ export function getApiErrorMessage(error, fallback) {
       const message = validationMessage(details)
       if (message) return message
     }
+    // Lỗi 500 chung của backend: ở môi trường dev kèm nguyên nhân thật (error.details) để dễ tìm ra lỗi.
+    if (import.meta.env.DEV && response.error?.code === "INTERNAL_SERVER_ERROR" && typeof details === "string" && details) {
+      return `${response.message || "Lỗi hệ thống"} — chi tiết: ${details.slice(0, 300)}`
+    }
     if (response.message) return response.message
     if (Array.isArray(details) && details.length) {
       return details.map((item) => item.msg || item.message).filter(Boolean).join("; ")

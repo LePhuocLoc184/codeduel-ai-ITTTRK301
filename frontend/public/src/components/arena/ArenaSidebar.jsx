@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Clock, Keyboard, ScrollText, Swords } from "lucide-react"
 
 // Cột phải: các khu vực đối thủ, đồng hồ, trạng thái gõ phím, sự kiện.
@@ -9,7 +10,7 @@ const SECTIONS = [
   { icon: ScrollText, label: "SỰ KIỆN", text: "Chưa có sự kiện nào." },
 ]
 
-export default function ArenaSidebar() {
+function ArenaSidebar() {
   return (
     <div className="arena-sidebar">
       {SECTIONS.map(({ icon: Icon, label, text }) => (
@@ -25,3 +26,6 @@ export default function ArenaSidebar() {
     </div>
   )
 }
+
+// memo: gõ code trong editor không làm render lại đề bài / console / cột phải.
+export default memo(ArenaSidebar)
