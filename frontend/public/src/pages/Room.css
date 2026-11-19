@@ -21,6 +21,22 @@
 .room-controls { padding-top: 22px; border-top: 1px solid #24292e; text-align: center; }
 .room-panel .room-controls p { margin: 0 0 16px; }
 
+/* Chọn ngôn ngữ trước khi vào trận */
+.room-setup { display: flex; flex-direction: column; gap: 10px; padding: 18px 0; border-top: 1px solid #24292e; }
+.lang-options { display: flex; gap: 8px; }
+.lang-options button { flex: 1; padding: 9px 0; border: 1px solid #30363c; border-radius: 6px; background: #0c0f12; color: #c3c8ce; font: 600 12px var(--mono); cursor: pointer; transition: all .2s; }
+.lang-options button:hover { border-color: #5d7a3c; color: #ffffff; }
+.lang-options button.active { border-color: var(--green); background: var(--green); color: #10150b; }
+.lang-options button:active { transform: scale(.97); }
+.room-setup small { color: #717a83; font-size: 11px; }
+
+/* Nút "Hủy đấu" trong phòng chờ */
+.room-controls { display: flex; flex-direction: column; align-items: center; }
+.room-cancel-button { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 8px 14px; border: 1px solid #653030; border-radius: 6px; background: transparent; color: #ff9b91; font-size: 12px; cursor: pointer; transition: background .2s, border-color .2s, transform .1s; }
+.room-cancel-button:hover { background: #2b1616; border-color: #ff5b5b; }
+.room-cancel-button:active { transform: scale(.97); }
+.room-cancel-button:disabled { opacity: .55; cursor: wait; }
+
 @media (max-width: 600px) {
   .room-panel { padding: 0 18px 22px; }
 }

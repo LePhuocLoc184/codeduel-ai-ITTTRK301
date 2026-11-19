@@ -1,6 +1,11 @@
 import { memo, useEffect, useState } from "react"
-import { Clock, Keyboard, ScrollText, Swords } from "lucide-react"
+import { Clock, Keyboard, ScrollText, Shield, Swords } from "lucide-react"
 import Avatar from "../Avatar"
+
+// Cùng ngưỡng với backend (RankBadge): <1300 BRONZE, 1300-1499 SILVER, 1500-1699 GOLD, >=1700 DIAMOND.
+// Phòng chỉ trả rating của người chơi nên badge được suy ra từ rating.
+const rankBadgeFor = (rating) =>
+  rating >= 1700 ? "DIAMOND" : rating >= 1500 ? "GOLD" : rating >= 1300 ? "SILVER" : "BRONZE"
 
 const pad = (value) => String(value).padStart(2, "0")
 
@@ -64,6 +69,9 @@ function ArenaSidebar({
               <span>
                 <b title={opponent.username}>{opponent.username}</b>
                 <small>{opponent.rating} điểm{opponent.left ? " · đã rời phòng" : ""}</small>
+                <em className={`rank-chip rank-chip-${rankBadgeFor(Number(opponent.rating) || 0).toLowerCase()}`}>
+                  <Shield size={11} /> {rankBadgeFor(Number(opponent.rating) || 0)}
+                </em>
               </span>
             </div>
           ) : (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,6 +9,7 @@ import {
   Play,
   RotateCcw,
   Send,
+  X,
   Swords,
   Trophy,
   Users,
@@ -43,7 +44,12 @@ const MATCH_DURATION_MS = 15 * 60 * 1000
 // Chạy / chấm code (compile + chạy testcase) lâu hơn các request thường (mặc định 10s).
 const JUDGE_TIMEOUT_MS = 60000
 const TYPING_IDLE_MS = 1500
-const OPPONENT_TYPING_TTL_MS = 5000
+// AC 4.2: chỉ báo "đối thủ đang gõ" tự biến mất sau 2 giây nếu không có gói mới.
+const OPPONENT_TYPING_TTL_MS = 2000
+// Khi đang gõ liên tục, gửi lại gói "đang gõ" mỗi giây để phía nhận không tự tắt chỉ báo.
+const TYPING_HEARTBEAT_MS = 1000
+// AC 3.2: chống spam, khóa nút Nộp bài tối thiểu 5 giây sau mỗi lần bấm.
+const SUBMIT_COOLDOWN_MS = 5000
 const MAX_EVENTS = 40
 
 // Server trả ISO có múi giờ; nếu thiếu thì coi là UTC để không lệch giờ theo máy người dùng.
@@ -148,6 +154,7 @@ function MatchResult({ result, players, userId }) {
 
 export default function Room() {
   const { roomCode } = useParams()
+  const navigate = useNavigate()
   const { user, loading } = useAuth()
 
   const socketRef = useRef(null)
@@ -159,7 +166,14 @@ export default function Room() {
   const [countdown, setCountdown] = useState(null)
   const [copied, setCopied] = useState(false)
 
-  const [language, setLanguage] = useState("cpp")
+  const [language, setLanguage] = useState(() => {
+    try {
+      const saved = localStorage.getItem("codeduel_language")
+      return saved && languageNames[saved] ? saved : "cpp"
+    } catch {
+      return "cpp"
+    }
+  })
   const [theme, setTheme] = useState("vs-dark")
   // Mỗi ngôn ngữ giữ code riêng để đổi qua lại không mất bài đang gõ.
   const [codes, setCodes] = useState({ cpp: "", python: "", java: "" })
@@ -175,14 +189,36 @@ export default function Room() {
   const [result, setResult] = useState(null)
   // busy: "run" | "submit" | null; output: kết quả hiển thị ở Console.
   const [judge, setJudge] = useState({ busy: null, output: null })
+  // Mốc (ms) nút Nộp bài được bấm lại; cooldownLeft đếm ngược cho nhãn nút.
+  const [submitLockedUntil, setSubmitLockedUntil] = useState(0)
+  const [cooldownLeft, setCooldownLeft] = useState(0)
 
   const eventIdRef = useRef(0)
   const roomStatusRef = useRef(null)
   const typingTimerRef = useRef(null)
   const typingActiveRef = useRef(false)
+  const lastTypingSentRef = useRef(0)
   const opponentTypingTimerRef = useRef(null)
 
   const code = codes[language] ?? ""
+
+  useEffect(() => {
+    if (!submitLockedUntil) return undefined
+
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((submitLockedUntil - Date.now()) / 1000))
+      setCooldownLeft(left)
+      return left
+    }
+
+    if (tick() === 0) return undefined
+
+    const timer = window.setInterval(() => {
+      if (tick() === 0) window.clearInterval(timer)
+    }, 250)
+
+    return () => window.clearInterval(timer)
+  }, [submitLockedUntil])
 
   const pushEvent = (text, tone = "info") => {
     eventIdRef.current += 1
@@ -524,8 +560,11 @@ export default function Room() {
   const notifyTyping = () => {
     if (roomStatusRef.current !== "PLAYING") return
 
-    if (!typingActiveRef.current) {
+    const now = Date.now()
+
+    if (!typingActiveRef.current || now - lastTypingSentRef.current >= TYPING_HEARTBEAT_MS) {
       typingActiveRef.current = true
+      lastTypingSentRef.current = now
       sendSocket({ action: "player_typing", is_typing: true })
     }
 
@@ -544,6 +583,7 @@ export default function Room() {
   // Chạy thử (public testcase, không ghi DB) hoặc nộp bài chính thức (toàn bộ testcase).
   const judgeCode = async (kind) => {
     if (judge.busy || !room?.question) return
+    if (kind === "submit" && Date.now() < submitLockedUntil) return
 
     if (!code.trim()) {
       setJudge({
@@ -554,6 +594,7 @@ export default function Room() {
     }
 
     setJudge({ busy: kind, output: null })
+    if (kind === "submit") setSubmitLockedUntil(Date.now() + SUBMIT_COOLDOWN_MS)
 
     const body = {
       question_id: room.question.id,
@@ -601,6 +642,12 @@ export default function Room() {
 
   const changeLanguage = (newLanguage) => {
     setLanguage(newLanguage)
+
+    try {
+      localStorage.setItem("codeduel_language", newLanguage)
+    } catch {
+      // Trình duyệt chặn lưu trữ thì chỉ không nhớ lựa chọn cho lần sau.
+    }
   }
 
   const resetCode = () => {
@@ -641,6 +688,84 @@ export default function Room() {
         "Kết nối phòng chưa sẵn sàng. Vui lòng thử lại.",
       )
     }
+  }
+
+  // Hủy đấu khi phòng còn đang chờ. Backend không có API hủy phòng riêng: khi người chơi ngắt
+  // WebSocket lúc phòng ở trạng thái WAITING, backend tự đặt phòng CANCELLED (và báo cho đối thủ).
+  // Việc đó xảy ra trễ một nhịp, nên phải đợi backend xác nhận rồi mới về Arena; nếu không,
+  // bấm "Tạo phòng" ngay sau đó sẽ bị báo "đang ở trong một phòng đang hoạt động" (409).
+  const [cancelling, setCancelling] = useState(false)
+
+  const waitRoomLeftWaiting = async (tries = 6, delayMs = 350) => {
+    for (let i = 0; i < tries; i += 1) {
+      try {
+        const { data } = await api.get(`/api/v1/rooms/${roomCode}`)
+
+        if (data.data?.status !== "WAITING") return true
+      } catch (err) {
+        // 404: không còn thấy phòng với mình nữa, coi như đã rời xong.
+        if (err.response?.status === 404) return true
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs))
+    }
+
+    return false
+  }
+
+  // Dự phòng: nếu socket cũ chưa từng được backend ghi nhận (đóng quá sớm) thì phòng vẫn WAITING.
+  // Mở một kết nối mới rồi đóng ngay để backend chạy lại luồng "người chơi thoát -> hủy phòng".
+  const reconnectAndLeave = () =>
+    new Promise((resolve) => {
+      const configuredBase = api.defaults.baseURL || "/"
+      const apiOrigin = /^https?:\/\//i.test(configuredBase)
+        ? new URL(configuredBase).origin
+        : window.location.origin
+      const token = localStorage.getItem("token") || ""
+      const socket = new WebSocket(
+        `${apiOrigin.replace(/^http/i, "ws")}/api/v1/rooms/ws/arena/${encodeURIComponent(roomCode)}?token=${encodeURIComponent(token)}`,
+      )
+      const finish = () => resolve()
+
+      socket.onopen = () => window.setTimeout(() => socket.close(), 300)
+      socket.onclose = finish
+      socket.onerror = finish
+      window.setTimeout(finish, 3000)
+    })
+
+  const cancelWaitingRoom = async () => {
+    if (cancelling) return
+
+    const hasOpponent = (room?.players || []).length >= 2
+
+    if (
+      hasOpponent &&
+      !window.confirm("Hủy đấu sẽ đóng phòng và đối thủ cũng bị đưa ra khỏi phòng. Bạn chắc chứ?")
+    ) {
+      return
+    }
+
+    setCancelling(true)
+    setError("")
+    window.clearTimeout(typingTimerRef.current)
+    window.clearTimeout(opponentTypingTimerRef.current)
+    socketRef.current?.close()
+    socketRef.current = null
+
+    let done = await waitRoomLeftWaiting()
+
+    if (!done) {
+      await reconnectAndLeave()
+      done = await waitRoomLeftWaiting()
+    }
+
+    if (!done) {
+      setError("Chưa hủy được phòng. Hãy bấm Hủy đấu lần nữa.")
+      setCancelling(false)
+      return
+    }
+
+    navigate("/arena")
   }
 
   const copyCode = async () => {
@@ -843,6 +968,27 @@ export default function Room() {
                 )}
               </div>
 
+              <div className="room-setup">
+                <span className="panel-label">NGÔN NGỮ CỦA BẠN</span>
+
+                <div className="lang-options" role="radiogroup" aria-label="Chọn ngôn ngữ lập trình">
+                  {Object.entries(languageNames).map(([key, name]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="radio"
+                      aria-checked={language === key}
+                      className={language === key ? "active" : ""}
+                      onClick={() => changeLanguage(key)}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+
+                <small>Mỗi người tự chọn ngôn ngữ của mình. Vào trận vẫn đổi được.</small>
+              </div>
+
               <div className="room-controls">
                 <p>
                   {countdown
@@ -866,6 +1012,16 @@ export default function Room() {
                     : "Sẵn sàng"}
 
                   <Swords size={16} />
+                </button>
+
+                <button
+                  className="room-cancel-button"
+                  type="button"
+                  onClick={cancelWaitingRoom}
+                  disabled={cancelling}
+                >
+                  <X size={15} />
+                  {cancelling ? "Đang hủy..." : "Hủy đấu"}
                 </button>
               </div>
             </div>
@@ -984,10 +1140,14 @@ export default function Room() {
                         type="button"
                         className="editor-submit-button"
                         onClick={() => judgeCode("submit")}
-                        disabled={Boolean(judge.busy)}
+                        disabled={Boolean(judge.busy) || cooldownLeft > 0}
                       >
                         <Send size={14} />
-                        {judge.busy === "submit" ? "Đang chấm..." : "Nộp bài"}
+                        {judge.busy === "submit"
+                          ? "Đang chấm..."
+                          : cooldownLeft > 0
+                            ? `Nộp lại sau ${cooldownLeft}s`
+                            : "Nộp bài"}
                       </button>
                     </div>
                   </div>

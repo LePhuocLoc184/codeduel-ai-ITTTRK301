@@ -30,6 +30,16 @@ function StatusChip({ status }) {
   return <span className={`console-status console-status-${tone}`}>{label}</span>
 }
 
+// AC 3.1: nhãn xanh/đỏ Passed / Failed cho từng testcase (kèm lý do cụ thể nếu là TLE/MLE/lỗi chạy).
+function CaseChip({ item }) {
+  if (item.passed) return <span className="console-status console-status-pass">Passed</span>
+  const { label, tone } = statusMeta(item.status)
+  return <span className={`console-status console-status-${tone}`}>{tone === "fail" ? `Failed · ${label}` : label}</span>
+}
+
+// AC 3.3: lỗi biên dịch / lỗi khi chạy.
+const isCodeError = (status) => status === "COMPILE_ERROR" || status === "RUNTIME_ERROR"
+
 function RunResult({ data }) {
   const results = data.results || []
 
@@ -45,22 +55,23 @@ function RunResult({ data }) {
       </div>
 
       {data.compile_error_message && (
-        <pre className="console-error">{data.compile_error_message}</pre>
+        <pre className="console-error console-error-strong">{data.compile_error_message}</pre>
       )}
 
-      {!data.compile_error_message && data.error_message && results.length === 0 && (
-        <pre className="console-error">{data.error_message}</pre>
+      {/* Lỗi tổng hợp (runtime...) in nguyên văn ở đầu console; lỗi riêng từng case vẫn hiện trong case đó. */}
+      {!data.compile_error_message && data.error_message && (results.length === 0 || isCodeError(data.status)) && (
+        <pre className="console-error console-error-strong">{data.error_message}</pre>
       )}
 
       {results.map((item, index) => (
         <details
           className="console-case"
           key={index}
-          open={!item.passed}
+          open={!item.passed || Boolean(item.error_message)}
         >
           <summary>
             <span>Case {index + 1}</span>
-            <StatusChip status={item.status} />
+            <CaseChip item={item} />
             <span className="console-case-meta">
               {formatMs(item.execution_time_ms)} · {formatMemory(item.memory_used_mb)}
             </span>
@@ -109,15 +120,20 @@ function SubmitResult({ data }) {
           : "Chưa đạt toàn bộ testcase. Hãy sửa code rồi nộp lại."}
       </p>
 
-      {data.error_message && <pre className="console-error">{data.error_message}</pre>}
+      {data.error_message && (
+        <pre className={`console-error${isCodeError(data.status) ? " console-error-strong" : ""}`}>{data.error_message}</pre>
+      )}
     </>
   )
 }
 
 // Khung Console ở cột giữa: hiển thị kết quả chạy thử / nộp bài trả về từ backend.
 function ConsolePanel({ busy = null, output = null }) {
+  const data = output?.data
+  const hasCodeError = !busy && Boolean(data) && (isCodeError(data.status) || Boolean(data.compile_error_message))
+
   return (
-    <div className="console-panel">
+    <div className={`console-panel${hasCodeError ? " console-panel-error" : ""}`}>
       <div className="console-head">
         <Terminal size={14} />
         <span className="panel-label">CONSOLE</span>
@@ -129,8 +145,13 @@ function ConsolePanel({ busy = null, output = null }) {
       <div className="console-body">
         {busy ? (
           <div className="console-loading" role="status">
-            <Loader2 size={15} className="console-spin" />
-            {busy === "run" ? "Đang chạy thử code…" : "Đang chấm bài…"}
+            <span className="console-loading-text">
+              <Loader2 size={15} className="console-spin" />
+              {busy === "run" ? "Đang chạy thử code…" : "Đang chấm bài…"}
+            </span>
+            {busy === "submit" && (
+              <div className="grading-bar" role="progressbar" aria-label="Tiến độ chấm bài"><i /></div>
+            )}
           </div>
         ) : output?.error ? (
           <div className="console-failure" role="alert">{output.error}</div>

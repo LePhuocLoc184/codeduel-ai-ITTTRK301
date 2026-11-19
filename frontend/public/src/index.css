@@ -518,7 +518,8 @@
 .progress-bar { height: 6px; overflow: hidden; border-radius: 999px; background: #1a1f24; }
 .progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width .3s; }
 .match-clock { color: #f1f2f4; font: 600 28px var(--mono); letter-spacing: 1px; }
-.match-clock.warn { color: #ff7b7b; }
+.match-clock.warn { color: #ff4d4d; animation: clock-blink 1s steps(2, start) infinite; }
+@keyframes clock-blink { 50% { opacity: .25; } }
 .match-clock-note { display: block; margin-top: 4px; font: 10px var(--mono); color: #ff9b91; }
 .typing-dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--green); animation: typing-pulse 1s ease-in-out infinite; }
 @keyframes typing-pulse { 50% { opacity: .25; } }
@@ -542,4 +543,26 @@
 
 @media (max-width: 600px) {
   .console-io { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- AC 4.1: badge rank của đối thủ --- */
+.opponent-card .rank-chip { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 2px 7px; border: 1px solid #30363c; border-radius: 4px; font: 600 9px var(--mono); font-style: normal; letter-spacing: .8px; color: #c5cbd0; background: #12161a; }
+.rank-chip-bronze { color: #d99a6c !important; border-color: #5e3f28 !important; }
+.rank-chip-silver { color: #c3ccd6 !important; border-color: #4a5560 !important; }
+.rank-chip-gold { color: #f2c35b !important; border-color: #5e5028 !important; }
+.rank-chip-diamond { color: #6fd0ff !important; border-color: #275a78 !important; }
+
+/* --- AC 3.2: thanh tiến độ chấm bài (không biết trước %, nên chạy dạng indeterminate) --- */
+.console-loading { flex-direction: column; align-items: stretch; }
+.console-loading-text { display: flex; align-items: center; gap: 8px; }
+.grading-bar { position: relative; height: 4px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: #1a1f24; }
+.grading-bar i { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--green); animation: grading-slide 1.2s ease-in-out infinite; }
+@keyframes grading-slide { 0% { left: -35%; } 100% { left: 100%; } }
+
+/* --- AC 3.3: lỗi biên dịch / chạy: monospace, nền tối, viền đỏ --- */
+.console-panel-error { border-color: #a83a3a; box-shadow: 0 0 0 1px rgba(255, 91, 91, .25); }
+.console-error-strong { border: 1px solid #ff5b5b; background: #170b0b; color: #ff9b91; font-family: var(--mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  .match-clock.warn, .grading-bar i { animation: none; }
 }
