@@ -50,6 +50,7 @@ function ArenaSidebar({
   const percent = Math.min(100, Math.max(0, Number(opponentProgress?.percent) || 0))
 
   let status = "Đối thủ chưa gõ code."
+  if (connection === "reconnecting") status = "Mất kết nối, đang tự nối lại…"
   if (connection === "disconnected") status = "Mất kết nối với phòng. Hãy tải lại trang để vào lại."
   else if (opponent?.left) status = "Đối thủ đã rời phòng."
   else if (opponentTyping) status = "Đối thủ đang gõ code…"
@@ -110,7 +111,7 @@ function ArenaSidebar({
           <span className="panel-label">TRẠNG THÁI</span>
         </div>
         <div className="side-card-body" aria-live="polite">
-          {opponentTyping && connection !== "disconnected" && !opponent?.left && <i className="typing-dot" />}
+          {opponentTyping && connection === "connected" && !opponent?.left && <i className="typing-dot" />}
           {status}
         </div>
       </section>
