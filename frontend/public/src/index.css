@@ -463,3 +463,106 @@
 @media (max-width: 600px) {
   .arena-page.room-arena-playing { width: calc(100% - 20px); }
 }
+/* --- Nút Chạy thử / Nộp bài trong thanh editor --- */
+.code-editor-settings { flex-wrap: wrap; justify-content: flex-end; }
+.editor-reset-button:disabled { opacity: .55; cursor: wait; }
+.editor-reset-button:disabled:hover { border-color: #343a3f; color: #c5cbd0; }
+
+.editor-submit-button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--green);
+  color: #10150b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transition: background .18s, transform .18s;
+}
+
+.editor-submit-button:hover { background: #c8ff82; transform: translateY(-1px); }
+.editor-submit-button:disabled { opacity: .55; cursor: wait; transform: none; }
+
+/* --- Console: kết quả chạy thử / nộp bài --- */
+.console-head .console-kind { margin-left: auto; font: 500 9px var(--mono); letter-spacing: 1px; color: #a8df69; }
+.console-loading { display: flex; align-items: center; gap: 8px; color: #a7afb8; }
+.console-spin { animation: console-spin 1s linear infinite; }
+@keyframes console-spin { to { transform: rotate(360deg); } }
+.console-failure { padding: 9px 10px; border-radius: 6px; background: #321d1c; color: #ff9b91; font: 12px/1.6 var(--mono); white-space: pre-wrap; }
+.console-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 10px; color: #a7afb8; font: 11px var(--mono); }
+.console-note { margin: 0 0 10px; color: #a7afb8; font-size: 12px; }
+.console-status { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid transparent; border-radius: 4px; font: 600 10px var(--mono); }
+.console-status-pass { color: #7ee07e; background: #14261a; border-color: #2c5a37; }
+.console-status-fail { color: #ff7b7b; background: #2b1616; border-color: #653030; }
+.console-status-warn { color: #f2c35b; background: #2a2412; border-color: #5e5028; }
+.console-case { margin-bottom: 8px; border: 1px solid #272d31; border-radius: 6px; background: #0a0c0f; }
+.console-case summary { display: flex; align-items: center; gap: 10px; padding: 7px 10px; cursor: pointer; color: #d6dbe0; font: 11px var(--mono); }
+.console-case-meta { margin-left: auto; color: #717a83; }
+.console-io { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 10px 10px; }
+.console-io small { display: block; margin-bottom: 4px; font: 9px var(--mono); letter-spacing: 1px; color: #717a83; }
+.console-io pre, .console-error { margin: 0; padding: 7px 9px; overflow-x: auto; border: 1px solid #272d31; border-radius: 6px; background: #0d1013; color: #d6dbe0; font: 12px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.console-error { margin: 0 10px 10px; border-color: #653030; background: #1d1212; color: #ff9b91; }
+.console-summary + .console-error { margin: 0 0 10px; }
+
+/* --- Cột phải: đối thủ, đồng hồ, trạng thái gõ, sự kiện --- */
+.opponent-card { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.opponent-card > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.opponent-card b { color: #e4e7e9; font: 600 14px var(--display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opponent-card small { font: 10px var(--mono); color: #717a83; }
+.opponent-progress { margin-top: 12px; }
+.opponent-progress small { display: block; margin-top: 6px; font: 10px var(--mono); color: #717a83; }
+.progress-bar { height: 6px; overflow: hidden; border-radius: 999px; background: #1a1f24; }
+.progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width .3s; }
+.match-clock { color: #f1f2f4; font: 600 28px var(--mono); letter-spacing: 1px; }
+.match-clock.warn { color: #ff4d4d; animation: clock-blink 1s steps(2, start) infinite; }
+@keyframes clock-blink { 50% { opacity: .25; } }
+.match-clock-note { display: block; margin-top: 4px; font: 10px var(--mono); color: #ff9b91; }
+.typing-dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--green); animation: typing-pulse 1s ease-in-out infinite; }
+@keyframes typing-pulse { 50% { opacity: .25; } }
+.event-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.event-item { display: flex; gap: 8px; font-size: 11px; line-height: 1.5; color: #8e979f; }
+.event-item time { flex: none; font: 10px var(--mono); color: #5d666f; }
+.event-success { color: #a9e673; }
+.event-warn { color: #f2c35b; }
+
+/* --- Kết quả trận --- */
+.match-result { max-width: 520px; }
+.result-players { display: flex; flex-direction: column; gap: 10px; margin: 0 0 20px; text-align: left; }
+.result-player { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #20252a; border-radius: 6px; background: #0c0f12; }
+.result-player > span:nth-child(2) { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-right: auto; }
+.result-player b { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-player small { font: 10px var(--mono); color: #717a83; }
+.result-player em { font: 600 11px var(--mono); font-style: normal; color: #8e979f; }
+.result-player em.up { color: #7ee07e; }
+.result-player em.down { color: #ff7b7b; }
+.arena-panel .result-time { margin: -6px 0 20px; font: 11px var(--mono); }
+
+@media (max-width: 600px) {
+  .console-io { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* --- AC 4.1: badge rank của đối thủ --- */
+.opponent-card .rank-chip { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 2px 7px; border: 1px solid #30363c; border-radius: 4px; font: 600 9px var(--mono); font-style: normal; letter-spacing: .8px; color: #c5cbd0; background: #12161a; }
+.rank-chip-bronze { color: #d99a6c !important; border-color: #5e3f28 !important; }
+.rank-chip-silver { color: #c3ccd6 !important; border-color: #4a5560 !important; }
+.rank-chip-gold { color: #f2c35b !important; border-color: #5e5028 !important; }
+.rank-chip-diamond { color: #6fd0ff !important; border-color: #275a78 !important; }
+
+/* --- AC 3.2: thanh tiến độ chấm bài (không biết trước %, nên chạy dạng indeterminate) --- */
+.console-loading { flex-direction: column; align-items: stretch; }
+.console-loading-text { display: flex; align-items: center; gap: 8px; }
+.grading-bar { position: relative; height: 4px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: #1a1f24; }
+.grading-bar i { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--green); animation: grading-slide 1.2s ease-in-out infinite; }
+@keyframes grading-slide { 0% { left: -35%; } 100% { left: 100%; } }
+
+/* --- AC 3.3: lỗi biên dịch / chạy: monospace, nền tối, viền đỏ --- */
+.console-panel-error { border-color: #a83a3a; box-shadow: 0 0 0 1px rgba(255, 91, 91, .25); }
+.console-error-strong { border: 1px solid #ff5b5b; background: #170b0b; color: #ff9b91; font-family: var(--mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  .match-clock.warn, .grading-bar i { animation: none; }
+}

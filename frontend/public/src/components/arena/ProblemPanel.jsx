@@ -1,3 +1,4 @@
+import { memo } from "react"
 import ReactMarkdown from "react-markdown"
 import { Clock, MemoryStick } from "lucide-react"
 import SampleCases from "./SampleCases"
@@ -8,7 +9,7 @@ const DIFFICULTY_LABELS = {
   HARD: "Khó",
 }
 
-export default function ProblemPanel({ question }) {
+function ProblemPanel({ question }) {
   const difficulty = String(question.difficulty || "").toUpperCase()
 
   return (
@@ -53,3 +54,6 @@ export default function ProblemPanel({ question }) {
     </div>
   )
 }
+
+// memo: gõ code trong editor không làm render lại đề bài / console / cột phải.
+export default memo(ProblemPanel)
