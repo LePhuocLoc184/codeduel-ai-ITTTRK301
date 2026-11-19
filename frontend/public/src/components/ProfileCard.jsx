@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Shield, Target, Trophy } from "lucide-react"
+import { History, Shield, Target, Trophy } from "lucide-react"
 import api from "../api/axios"
 import { useAuth } from "../context/AuthContext"
 import "./ProfileCard.css"
@@ -7,6 +7,11 @@ import "./ProfileCard.css"
 // Cùng ngưỡng với backend (RankBadge): <1300 BRONZE, 1300-1499 SILVER, 1500-1699 GOLD, >=1700 DIAMOND.
 const rankBadgeFor = (rating) => (rating >= 1700 ? "DIAMOND" : rating >= 1500 ? "GOLD" : rating >= 1300 ? "SILVER" : "BRONZE")
 const winRateFor = (wins, games) => (games > 0 ? (wins / games) * 100 : 0)
+const formatDate = (value) => {
+  const time = value ? Date.parse(/(Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`) : NaN
+  return Number.isNaN(time) ? "—" : new Date(time).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+}
+const MODE_LABELS = { RANKED_1V1: "Ranked", CUSTOM_1V1: "Phòng riêng" }
 const formatPercent = (value) => `${Math.round(Number(value || 0) * 10) / 10}%`
 
 export default function ProfileCard() {
@@ -30,9 +35,11 @@ export default function ProfileCard() {
   const rating = Number(data.rating ?? 1200)
   const rank = String(data.rank_badge || rankBadgeFor(rating)).toUpperCase()
   const winRate = Math.min(100, Math.max(0, Number(data.win_rate ?? winRateFor(data.wins ?? 0, data.rated_games ?? 0))))
+  const recent = profile?.id === user.id && Array.isArray(profile.recent_matches) ? profile.recent_matches : []
   const showImage = Boolean(data.avatar_url) && brokenAvatar !== data.avatar_url
 
-  return <section className={`profile-card profile-rank-${rank.toLowerCase()}`} aria-label="Thẻ người chơi">
+  return <>
+  <section className={`profile-card profile-rank-${rank.toLowerCase()}`} aria-label="Thẻ người chơi">
     <div className="profile-avatar">
       {showImage
         ? <img src={data.avatar_url} alt={`Avatar của ${data.username}`} onError={() => setBrokenAvatar(data.avatar_url)} />
@@ -55,4 +62,14 @@ export default function ProfileCard() {
       </div>
     </div>
   </section>
+  {recent.length > 0 && <section className="profile-history" aria-label="Trận đấu gần đây">
+    <div className="profile-history-head"><History size={12} /> TRẬN GẦN ĐÂY</div>
+    <ul>{recent.map((match) => <li key={match.room_id}>
+      <span className={`history-result ${match.is_win ? "win" : "loss"}`}>{match.is_win ? "THẮNG" : "THUA"}</span>
+      <span className="history-mode">{MODE_LABELS[match.game_mode] || match.game_mode}</span>
+      <time>{formatDate(match.finished_at)}</time>
+      <em className={match.elo_change > 0 ? "up" : match.elo_change < 0 ? "down" : ""}>{match.elo_change > 0 ? `+${match.elo_change}` : match.elo_change} điểm</em>
+    </li>)}</ul>
+  </section>}
+  </>
 }

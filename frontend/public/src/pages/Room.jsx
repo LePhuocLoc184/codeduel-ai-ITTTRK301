@@ -234,9 +234,20 @@ export default function Room() {
           }
         }
 
-        socket.onclose = () => {
-          if (active) {
-            setConnection("disconnected")
+        socket.onclose = (closeEvent) => {
+          if (!active) return
+
+          setConnection("disconnected")
+
+          // Mã đóng do backend đặt trong arena_websocket.
+          if (closeEvent.code === 4003) {
+            setError("Bạn không có quyền vào phòng này hoặc phiên đăng nhập đã hết hạn.")
+          } else if (closeEvent.code === 4004) {
+            setRoom((current) =>
+              current ? { ...current, status: "CANCELLED" } : current,
+            )
+          } else if (closeEvent.code === 4001) {
+            setError("Phòng này đang được mở ở một tab khác nên kết nối ở đây đã bị đóng.")
           }
         }
 
@@ -648,6 +659,35 @@ export default function Room() {
     }
   }
 
+  // Phòng đã FINISHED mà chưa có kết quả từ socket (vào lại / tải lại trang): /rooms/{code} không trả
+  // elo_change, nên lấy phần của chính mình từ lịch sử 10 trận gần nhất (/users/{id}/history).
+  const [restoredElo, setRestoredElo] = useState({})
+  const needsEloRestore = room?.status === "FINISHED" && !result
+  const restoreRoomId = room?.room_id
+
+  useEffect(() => {
+    if (!needsEloRestore || !user?.id || !restoreRoomId) return undefined
+
+    let active = true
+
+    api
+      .get(`/api/v1/users/${user.id}/history`)
+      .then(({ data }) => {
+        if (!active) return
+
+        const match = (data.data || []).find((item) => item.room_id === restoreRoomId)
+
+        if (match && typeof match.elo_change === "number") {
+          setRestoredElo({ [user.id]: match.elo_change })
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [needsEloRestore, user?.id, restoreRoomId])
+
   const currentPlayer = room?.players?.find(
     (player) => player.user_id === user?.id,
   )
@@ -670,7 +710,7 @@ export default function Room() {
   const finalResult =
     result ??
     (room?.status === "FINISHED"
-      ? { is_draw: !room.winner_id, winner_id: room.winner_id, elo_change: {} }
+      ? { is_draw: !room.winner_id, winner_id: room.winner_id, elo_change: restoredElo }
       : null)
 
   if (!user && !loading) {
