@@ -1,0 +1,60 @@
+/* ===== Màn hình chờ ghép trận (/matchmaking) ===== */
+.mm-page { position: relative; isolation: isolate; width: min(860px, calc(100% - 48px)); min-height: calc(100vh - 145px); margin: 0 auto; padding: 64px 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.mm-page:before { content: ""; position: absolute; left: 0; right: 0; top: -30px; height: 440px; z-index: -1; background: radial-gradient(ellipse at 50% 42%, rgba(131, 192, 58, .1), transparent 66%); }
+.mm-page .eyebrow { justify-content: center; }
+.mm-page h1 { margin: 18px 0 10px; font: 600 clamp(34px, 5vw, 48px)/1.1 var(--display); letter-spacing: -2px; }
+.mm-page h1 span { color: var(--green); }
+.mm-sub { max-width: 460px; margin: 0; color: #8d969e; font-size: 12px; line-height: 1.8; }
+.mm-loading { margin: auto; display: flex; align-items: center; gap: 10px; color: #8d969e; font-size: 12px; }
+.mm-spin { animation: mm-rotate 1s linear infinite; }
+@keyframes mm-rotate { to { transform: rotate(360deg); } }
+
+.mm-versus { width: 100%; margin: 44px 0 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 20px; }
+.mm-player { min-width: 0; padding: 26px 20px 22px; display: flex; flex-direction: column; align-items: center; gap: 14px; border: 1px solid #282d32; border-radius: 8px; background: #111519; transition: border-color .3s, box-shadow .3s; }
+.mm-player.is-found { border-color: #3c4935; box-shadow: 0 0 40px rgba(159, 229, 74, .08); }
+.mm-info { min-width: 0; max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.mm-name { max-width: 100%; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f1f2f4; font: 600 17px var(--display); letter-spacing: -.4px; }
+.mm-rating { display: inline-flex; align-items: center; gap: 6px; color: #b9c0c7; font: 11px var(--mono); }
+.mm-rating svg { color: #e7bd55; }
+.mm-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid #3c4935; border-radius: 3px; color: var(--green); font: 500 9px var(--mono); letter-spacing: 1.2px; }
+.mm-badge-muted { border-color: #272d31; color: #5d666f; }
+.mm-tag { margin-top: 4px; color: #5d666f; font: 9px var(--mono); letter-spacing: 1.2px; }
+
+/* Ô đối thủ chưa xác định: dấu ? có vòng quét lan ra */
+.mm-unknown { position: relative; width: 88px; height: 88px; display: grid; place-items: center; border: 2px dashed #394631; border-radius: 50%; color: var(--green); font: 600 34px var(--display); }
+.mm-unknown:before, .mm-unknown:after { content: ""; position: absolute; inset: -2px; border: 1px solid var(--green); border-radius: 50%; opacity: 0; animation: mm-scan 2.4s ease-out infinite; }
+.mm-unknown:after { animation-delay: 1.2s; }
+.mm-player-unknown .mm-name { color: #8d969e; }
+
+/* Chữ VS ở giữa với hai vòng radar */
+.mm-vs { position: relative; width: 64px; height: 64px; display: grid; place-items: center; }
+.mm-vs span { position: relative; z-index: 1; width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid #394631; border-radius: 50%; background: #151c14; color: var(--green); font: 600 12px var(--mono); letter-spacing: 1px; }
+.mm-vs i { position: absolute; inset: 0; border: 1px solid #b4f56655; border-radius: 50%; animation: mm-ping 2.4s ease-out infinite; }
+.mm-vs i:nth-child(2) { animation-delay: 1.2s; }
+.mm-vs.is-found i { animation: none; opacity: 0; }
+@keyframes mm-scan { 0% { transform: scale(.9); opacity: .6; } 100% { transform: scale(1.22); opacity: 0; } }
+@keyframes mm-ping { 0% { transform: scale(.7); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
+
+.mm-timer-box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.mm-timer { color: #f1f2f4; font: 600 42px/1 var(--mono); letter-spacing: 2px; }
+.mm-timer-box small { color: #717a83; font: 9px var(--mono); letter-spacing: 1.4px; }
+.mm-range { margin: 18px 0 0; color: #8d969e; font-size: 11px; line-height: 1.7; }
+.mm-range b { color: var(--green); font-family: var(--mono); font-weight: 500; }
+.mm-page .arena-message { width: 100%; }
+.mm-actions { margin-top: 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; }
+
+@media (max-width: 640px) {
+  .mm-page { width: calc(100% - 32px); padding: 44px 0; }
+  .mm-versus { grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 28px 0 22px; }
+  .mm-player { flex-direction: row; gap: 16px; padding: 16px 18px; text-align: left; }
+  .mm-player .avatar-xl, .mm-unknown { flex: none; width: 60px; height: 60px; font-size: 22px; }
+  .mm-unknown { font-size: 24px; }
+  .mm-info { align-items: flex-start; gap: 6px; }
+  .mm-tag { order: -1; margin: 0; }
+  .mm-vs { width: 40px; height: 40px; margin: 0 auto; }
+  .mm-vs span { width: 32px; height: 32px; font-size: 10px; }
+  .mm-timer { font-size: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-spin, .mm-unknown:before, .mm-unknown:after, .mm-vs i { animation: none; }
+}

@@ -6,6 +6,7 @@ import Login from "../pages/Login"
 import Register from "../pages/Register"
 import Arena from "../pages/Arena"
 import Room from "../pages/Room"
+import Matchmaking from "../pages/Matchmaking"
 
 export default function AppRoutes() {
   return <Routes>
@@ -15,6 +16,7 @@ export default function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/arena" element={<Arena />} />
+      <Route path="/matchmaking" element={<Matchmaking />} />
       <Route path="/room/:roomCode" element={<Room />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>

@@ -1,0 +1,29 @@
+/* ===== Phòng chờ (WAITING): danh sách người chơi, sao chép mã, nút Sẵn sàng ===== */
+/* .arena-panel.room-panel: nâng độ ưu tiên hơn .arena-panel (căn giữa, padding 35px) trong index.css */
+.arena-panel.room-panel { max-width: 520px; padding: 0 26px 28px; text-align: left; }
+.room-panel .leader-card-head { padding: 20px 0 16px; }
+
+/* Nút "Sao chép mã": bỏ style mặc định của <button> */
+.room-panel .watch-link { gap: 7px; padding: 7px 11px; border: 1px solid #30363c; border-radius: 5px; background: #0c0f12; color: #c3c8ce; font: 10px var(--mono); letter-spacing: .4px; cursor: pointer; transition: border-color .2s, color .2s; }
+.room-panel .watch-link:hover { border-color: #5d7a3c; color: var(--green); }
+
+.room-players { display: flex; flex-direction: column; gap: 10px; padding: 18px 0 22px; }
+.room-player { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #20252a; border-radius: 6px; background: #0c0f12; }
+.room-player > span:nth-child(2) { min-width: 0; margin-right: auto; display: flex; flex-direction: column; gap: 4px; }
+.room-player b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e4e7e9; font-size: 12px; font-weight: 600; }
+.room-player small { color: #717a83; font: 10px var(--mono); }
+.room-player > svg { flex: none; color: var(--green); }
+
+.room-waiting { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 16px; border: 1px dashed #30363c; border-radius: 6px; color: #8d969e; font-size: 12px; }
+.room-waiting svg { color: var(--green); animation: room-pulse 1.6s ease-in-out infinite; }
+@keyframes room-pulse { 50% { opacity: .3; } }
+
+.room-controls { padding-top: 22px; border-top: 1px solid #24292e; text-align: center; }
+.room-panel .room-controls p { margin: 0 0 16px; }
+
+@media (max-width: 600px) {
+  .room-panel { padding: 0 18px 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-waiting svg { animation: none; }
+}
