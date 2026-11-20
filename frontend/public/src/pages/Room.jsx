@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react"
 import Editor from "@monaco-editor/react"
-import api, { getApiErrorMessage } from "../api/axios"
+import api, { getToken, getApiErrorMessage } from "../api/axios"
 import { useAuth } from "../context/AuthContext"
 import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
@@ -298,7 +298,7 @@ export default function Room() {
         const roomData = data.data
         setRoom(roomData)
 
-        const token = localStorage.getItem("token")
+        const token = getToken()
 
         const configuredBase = api.defaults.baseURL || "/"
 
@@ -621,7 +621,7 @@ export default function Room() {
     let draft = null
 
     try {
-      draft = JSON.parse(localStorage.getItem(`codeduel_draft:${roomCode}:${questionId}`) || "null")
+      draft = JSON.parse(localStorage.getItem(`codeduel_draft:${userId}:${roomCode}:${questionId}`) || "null")
     } catch {
       draft = null
     }
@@ -631,7 +631,7 @@ export default function Room() {
       python: draft?.python ?? starter.python ?? "",
       java: draft?.java ?? starter.java ?? "",
     })
-  }, [room?.question, roomCode])
+  }, [room?.question, roomCode, userId])
 
   // Lưu nháp code trong lúc đang thi đấu; xóa khi trận kết thúc.
   useEffect(() => {
@@ -639,7 +639,7 @@ export default function Room() {
 
     if (!questionId || loadedQuestionRef.current !== questionId) return undefined
 
-    const key = `codeduel_draft:${roomCode}:${questionId}`
+    const key = `codeduel_draft:${userId}:${roomCode}:${questionId}`
 
     try {
       if (room?.status === "FINISHED" || room?.status === "CANCELLED") {
@@ -659,7 +659,7 @@ export default function Room() {
     }, 500)
 
     return () => window.clearTimeout(timer)
-  }, [codes, room?.question?.id, room?.status, roomCode])
+  }, [codes, room?.question?.id, room?.status, roomCode, userId])
 
   const handleEditorMount = (editor) => {
     editorRef.current = editor
@@ -830,7 +830,7 @@ export default function Room() {
       const apiOrigin = /^https?:\/\//i.test(configuredBase)
         ? new URL(configuredBase).origin
         : window.location.origin
-      const token = localStorage.getItem("token") || ""
+      const token = getToken() || ""
       const socket = new WebSocket(
         `${apiOrigin.replace(/^http/i, "ws")}/api/v1/rooms/ws/arena/${encodeURIComponent(roomCode)}?token=${encodeURIComponent(token)}`,
       )

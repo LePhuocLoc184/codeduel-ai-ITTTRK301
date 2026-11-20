@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight, Loader2, Shield, Swords, Trophy, X } from "lucide-react"
-import api, { getApiErrorMessage } from "../api/axios"
+import api, { getToken, getApiErrorMessage } from "../api/axios"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "../components/Avatar"
 import "./Matchmaking.css"
@@ -146,7 +146,7 @@ export default function Matchmaking() {
     const cancelSilently = () => { api.delete(CANCEL_PATH).catch(() => {}) }
     const onPageHide = () => {
       if (phaseRef.current !== "searching") return
-      const token = localStorage.getItem("token")
+      const token = getToken()
       if (!token) return
       fetch(`${api.defaults.baseURL || ""}${CANCEL_PATH}`, { method: "DELETE", keepalive: true, headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
     }
