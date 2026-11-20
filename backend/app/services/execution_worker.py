@@ -29,7 +29,33 @@ def kill_and_wait(processes: list) -> None:
     for process in reversed(processes):
         with suppress(psutil.NoSuchProcess):
             process.kill()
-    psutil.wait_procs(processes, timeout=1)
+    _, alive = psutil.wait_procs(processes, timeout=1)
+    if alive:
+        # kill() gửi yêu cầu hủy; tiến trình có thể chưa được hệ điều hành thu hồi
+        # ngay. Chờ thêm và kiểm tra kết quả, không bỏ qua danh sách còn sống.
+        for process in alive:
+            with suppress(psutil.NoSuchProcess):
+                process.kill()
+        _, alive = psutil.wait_procs(alive, timeout=1)
+        if alive:
+            raise psutil.TimeoutExpired(2, pid=alive[0].pid)
+
+
+def cleanup_children(tracked: list) -> None:
+    """Dọn con của worker, kể cả tiến trình cháu được nhận nuôi sau khi cha chết."""
+    owner = psutil.Process()
+    remaining = {process.pid: process for process in tracked}
+    deadline = time.monotonic() + 3
+    while True:
+        # Quét lại sau mỗi lượt kill/wait: một tiến trình có thể kịp sinh thêm
+        # con trong khoảng từ lúc lấy danh sách đến khi bị hủy.
+        remaining.update((child.pid, child) for child in owner.children(recursive=True))
+        if not remaining:
+            return
+        if time.monotonic() >= deadline:
+            raise psutil.TimeoutExpired(3)
+        kill_and_wait(list(remaining.values()))
+        remaining.clear()
 
 
 def execute_case(command: list[str], directory: str, stdin: str,
@@ -132,9 +158,9 @@ def execute_case(command: list[str], directory: str, stdin: str,
                     # kể cả khi tiến trình chính đã chết nhưng con vẫn chạy.
                     with suppress(ProcessLookupError):
                         os.killpg(int(child_pid), signal.SIGKILL)
-            for child in psutil.Process().children(recursive=True):
-                tracked[child.pid] = child
-            kill_and_wait(list(tracked.values()))
+            # Dọn cả khi PASS/FAIL: chương trình chính có thể đã thoát nhưng
+            # để lại tiến trình con chạy nền. Worker không được bỏ lại chúng.
+            cleanup_children(list(tracked.values()))
             if IS_LINUX:
                 # Thu hồi cả zombie đã được subreaper nhận nuôi.
                 with suppress(ChildProcessError):
