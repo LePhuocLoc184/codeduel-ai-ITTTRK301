@@ -43,3 +43,35 @@
 @media (prefers-reduced-motion: reduce) {
   .room-waiting svg { animation: none; }
 }
+
+/* --- Màn chúc mừng chiến thắng --- */
+.match-result { position: relative; }
+.match-result-won { border-color: #4a6a2b; box-shadow: 0 0 0 1px rgba(180, 245, 102, .25), 0 0 70px rgba(180, 245, 102, .14); animation: victory-rise .6s cubic-bezier(.2, .9, .3, 1.2) both; }
+.victory-banner { display: inline-block; margin-bottom: 14px; padding: 5px 14px; border: 1px solid #4a6a2b; border-radius: 999px; background: #162011; color: var(--green); font: 700 10px var(--mono); letter-spacing: 2.4px; }
+.match-result-won .feature-icon { width: 58px; height: 58px; animation: trophy-pop .9s cubic-bezier(.2, .9, .3, 1.4) .15s both, trophy-glow 2.4s ease-in-out 1s infinite; }
+.match-result-won .feature-icon svg { width: 28px; height: 28px; }
+.match-result-won h1 { background: linear-gradient(90deg, #d9ff9f, #b4f566 45%, #f2d675); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.arena-panel .victory-elo { margin: -8px 0 18px; color: #7ee07e; font: 700 13px var(--mono); }
+
+.confetti { position: fixed; inset: 0; z-index: 30; overflow: hidden; pointer-events: none; }
+.confetti-piece { position: absolute; top: -16px; width: 8px; height: 14px; border-radius: 2px; opacity: 0; animation-name: confetti-fall; animation-timing-function: linear; animation-iteration-count: 2; animation-fill-mode: both; }
+.confetti-0 { background: #b4f566; }
+.confetti-1 { background: #f2d675; }
+.confetti-2 { background: #84c4e9; }
+.confetti-3 { background: #bd9afb; }
+.confetti-4 { background: #ff9b91; }
+
+@keyframes confetti-fall {
+  0% { transform: translate3d(0, -20px, 0) rotate(0deg); opacity: 0; }
+  8% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translate3d(var(--drift, 0px), 105vh, 0) rotate(720deg); opacity: 0; }
+}
+@keyframes victory-rise { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes trophy-pop { 0% { transform: scale(.3) rotate(-18deg); opacity: 0; } 60% { transform: scale(1.18) rotate(6deg); opacity: 1; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes trophy-glow { 0%, 100% { box-shadow: 0 0 0 rgba(180, 245, 102, 0); } 50% { box-shadow: 0 0 26px rgba(180, 245, 102, .45); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
+  .match-result-won, .match-result-won .feature-icon { animation: none; }
+}

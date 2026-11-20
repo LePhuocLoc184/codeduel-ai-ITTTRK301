@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { ArrowLeft, ArrowRight, Loader2, Shield, Swords, Trophy, X } from "lucide-react"
-import api, { getApiErrorMessage } from "../api/axios"
+import api, { getToken, getApiErrorMessage } from "../api/axios"
 import { useAuth } from "../context/AuthContext"
 import Avatar from "../components/Avatar"
 import "./Matchmaking.css"
@@ -47,6 +47,9 @@ function UnknownCard() {
 
 export default function Matchmaking() {
   const { user, loading } = useAuth()
+  // Chỉ phụ thuộc id: object `user` bị thay mỗi khi /users/me trả về, làm effect hỏi trạng thái
+  // chạy lại và đặt lại đồng hồ đếm ngược khi đã tìm thấy đối thủ.
+  const userId = user?.id
   const navigate = useNavigate()
   // checking: hỏi trạng thái hàng đợi | searching | found | ended: lượt chờ đã kết thúc ngoài ý muốn | error
   const [phase, setPhaseState] = useState("checking")
@@ -66,7 +69,7 @@ export default function Matchmaking() {
   // Hỏi trạng thái hàng đợi định kỳ. Trang này không tự "vào hàng đợi": việc đó làm ở Arena,
   // nên mở/tải lại trang vẫn nối lại đúng lượt đang chờ (hoặc quay về Arena nếu không có lượt nào).
   useEffect(() => {
-    if (loading || !user) return undefined
+    if (loading || !userId) return undefined
     let active = true
     let failures = 0
     let first = true
@@ -113,7 +116,7 @@ export default function Matchmaking() {
     }
     tick()
     return () => { active = false; window.clearTimeout(timer) }
-  }, [user, loading, attempt, navigate])
+  }, [userId, loading, attempt, navigate])
 
   // Đếm thời gian đã chờ.
   useEffect(() => {
@@ -143,7 +146,7 @@ export default function Matchmaking() {
     const cancelSilently = () => { api.delete(CANCEL_PATH).catch(() => {}) }
     const onPageHide = () => {
       if (phaseRef.current !== "searching") return
-      const token = localStorage.getItem("token")
+      const token = getToken()
       if (!token) return
       fetch(`${api.defaults.baseURL || ""}${CANCEL_PATH}`, { method: "DELETE", keepalive: true, headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
     }

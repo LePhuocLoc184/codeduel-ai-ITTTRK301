@@ -15,7 +15,7 @@ import {
   Users,
 } from "lucide-react"
 import Editor from "@monaco-editor/react"
-import api, { getApiErrorMessage } from "../api/axios"
+import api, { getToken, getApiErrorMessage } from "../api/axios"
 import { useAuth } from "../context/AuthContext"
 import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
@@ -50,6 +50,8 @@ const OPPONENT_TYPING_TTL_MS = 2000
 const TYPING_HEARTBEAT_MS = 1000
 // AC 3.2: chống spam, khóa nút Nộp bài tối thiểu 5 giây sau mỗi lần bấm.
 const SUBMIT_COOLDOWN_MS = 5000
+// Số lần tự nối lại WebSocket tối đa khi mất kết nối giữa chừng.
+const MAX_RECONNECT_ATTEMPTS = 8
 const MAX_EVENTS = 40
 
 // Server trả ISO có múi giờ; nếu thiếu thì coi là UTC để không lệch giờ theo máy người dùng.
@@ -72,6 +74,37 @@ const languageNames = {
   java: "Java",
 }
 
+// Pháo giấy cho người thắng: vị trí, độ trễ, màu và độ dài rơi được tính cố định từ chỉ số
+// (không dùng Math.random trong render để hiệu ứng không đổi mỗi lần component render lại).
+const CONFETTI_COUNT = 42
+const confettiPieces = Array.from({ length: CONFETTI_COUNT }, (_, index) => ({
+  id: index,
+  left: (index * 37) % 100,
+  delay: ((index * 53) % 18) / 10,
+  duration: 3.2 + ((index * 29) % 22) / 10,
+  drift: ((index * 17) % 9) - 4,
+  hue: index % 5,
+}))
+
+function Confetti() {
+  return (
+    <div className="confetti" aria-hidden="true">
+      {confettiPieces.map((piece) => (
+        <i
+          key={piece.id}
+          className={`confetti-piece confetti-${piece.hue}`}
+          style={{
+            left: `${piece.left}%`,
+            animationDelay: `${piece.delay}s`,
+            animationDuration: `${piece.duration}s`,
+            "--drift": `${piece.drift * 18}px`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 function MatchResult({ result, players, userId }) {
   const won = Boolean(userId) && result.winner_id === userId
   const winner = players.find((player) => player.user_id === result.winner_id)
@@ -91,8 +124,14 @@ function MatchResult({ result, players, userId }) {
 
   const seconds = Number(result.completion_time)
 
+  const myDelta = result.elo_change?.[userId]
+
   return (
-    <div className="arena-panel match-result">
+    <div className={`arena-panel match-result${won ? " match-result-won" : ""}`}>
+      {won && <Confetti />}
+
+      {won && <span className="victory-banner">CHIẾN THẮNG</span>}
+
       <div
         className={`feature-icon ${won ? "green" : result.is_draw ? "blue" : "purple"}`}
       >
@@ -100,6 +139,10 @@ function MatchResult({ result, players, userId }) {
       </div>
 
       <h1>{title}</h1>
+
+      {won && typeof myDelta === "number" && myDelta > 0 && (
+        <p className="victory-elo">+{myDelta} điểm xếp hạng</p>
+      )}
 
       <p>{subtitle}</p>
 
@@ -202,6 +245,12 @@ export default function Room() {
 
   const code = codes[language] ?? ""
 
+  // Chỉ phụ thuộc vào id: AuthContext thay object `user` mỗi khi /users/me trả về hay đổi avatar,
+  // nếu phụ thuộc cả object thì socket bị đóng rồi mở lại (và có thể làm backend hủy phòng đang chờ).
+  const userId = user?.id
+  // true khi chính người chơi chủ động đóng socket (Hủy đấu) -> không tự kết nối lại.
+  const manualCloseRef = useRef(false)
+
   useEffect(() => {
     if (!submitLockedUntil) return undefined
 
@@ -233,9 +282,12 @@ export default function Room() {
   }
 
   useEffect(() => {
-    if (loading || !user) return undefined
+    if (loading || !userId) return undefined
 
     let active = true
+    let reconnectTimer = null
+    let attempts = 0
+    manualCloseRef.current = false
 
     const connect = async () => {
       try {
@@ -246,7 +298,7 @@ export default function Room() {
         const roomData = data.data
         setRoom(roomData)
 
-        const token = localStorage.getItem("token")
+        const token = getToken()
 
         const configuredBase = api.defaults.baseURL || "/"
 
@@ -256,253 +308,271 @@ export default function Room() {
 
         const socketOrigin = apiOrigin.replace(/^http/i, "ws")
 
-        const socket = new WebSocket(
-          `${socketOrigin}/api/v1/rooms/ws/arena/${encodeURIComponent(
-            roomCode,
-          )}?token=${encodeURIComponent(token || "")}`,
-        )
+        const openSocket = () => {
+          const socket = new WebSocket(
+            `${socketOrigin}/api/v1/rooms/ws/arena/${encodeURIComponent(
+              roomCode,
+            )}?token=${encodeURIComponent(token || "")}`,
+          )
 
-        socketRef.current = socket
+          socketRef.current = socket
 
-        socket.onopen = () => {
-          if (active) {
-            setConnection("connected")
+          socket.onopen = () => {
+            if (active) {
+              attempts = 0
+              setConnection("connected")
+            }
           }
-        }
 
-        socket.onclose = (closeEvent) => {
-          if (!active) return
+          socket.onclose = (closeEvent) => {
+            if (!active) return
 
-          setConnection("disconnected")
-
-          // Mã đóng do backend đặt trong arena_websocket.
-          if (closeEvent.code === 4003) {
-            setError("Bạn không có quyền vào phòng này hoặc phiên đăng nhập đã hết hạn.")
-          } else if (closeEvent.code === 4004) {
-            setRoom((current) =>
-              current ? { ...current, status: "CANCELLED" } : current,
-            )
-          } else if (closeEvent.code === 4001) {
-            setError("Phòng này đang được mở ở một tab khác nên kết nối ở đây đã bị đóng.")
-          }
-        }
-
-        socket.onerror = () => {
-          if (active) {
             setConnection("disconnected")
-          }
-        }
 
-        socket.onmessage = (event) => {
-          if (!active) return
+            // Mất mạng / backend khởi động lại giữa chừng: tự nối lại để không mất trận.
+            // Không nối lại khi: tự đóng chủ động, bị backend từ chối (4001/4003/4004) hoặc trận đã kết thúc.
+            const refused = [4001, 4003, 4004].includes(closeEvent.code)
+            const roomOver = ["FINISHED", "CANCELLED"].includes(roomStatusRef.current)
 
-          try {
-            const message = JSON.parse(event.data)
-
-            if (message.event === "ROOM_STATE") {
-              setRoom(message.data)
+            if (!refused && !roomOver && !manualCloseRef.current && attempts < MAX_RECONNECT_ATTEMPTS) {
+              attempts += 1
+              setConnection("reconnecting")
+              reconnectTimer = window.setTimeout(() => {
+                if (active && !manualCloseRef.current) openSocket()
+              }, Math.min(1000 * attempts, 5000))
             }
 
-            if (
-              message.event === "JOIN_ROOM" &&
-              roomStatusRef.current === "PLAYING" &&
-              message.data?.user_id !== user.id
-            ) {
-              pushEvent(
-                `${message.data?.username || "Đối thủ"} đã vào lại phòng.`,
-              )
-            }
-
-            if (
-              ["JOIN_ROOM", "PLAYER_READY"].includes(message.event) &&
-              message.data?.players
-            ) {
-              setRoom((current) =>
-                current
-                  ? {
-                      ...current,
-                      players: message.data.players,
-                    }
-                  : current,
-              )
-            }
-
-            if (message.event === "PLAYER_LEFT") {
-              const leftId = message.data.user_id
-              const inMatch = roomStatusRef.current === "PLAYING"
-
-              setRoom((current) =>
-                current
-                  ? {
-                      ...current,
-                      players: inMatch
-                        ? (current.players || []).map((player) =>
-                            player.user_id === leftId
-                              ? { ...player, left: true }
-                              : player,
-                          )
-                        : (current.players || []).filter(
-                            (player) => player.user_id !== leftId,
-                          ),
-                    }
-                  : current,
-              )
-
-              if (inMatch && leftId !== user.id) {
-                setOpponentTyping(false)
-                pushEvent(
-                  `${message.data.username || "Đối thủ"} đã rời phòng.`,
-                  "warn",
-                )
-              }
-            }
-
-            if (message.event === "ROOM_CANCELLED") {
-              setCountdown(null)
+            // Mã đóng do backend đặt trong arena_websocket.
+            if (closeEvent.code === 4003) {
+              setError("Bạn không có quyền vào phòng này hoặc phiên đăng nhập đã hết hạn.")
+            } else if (closeEvent.code === 4004) {
               setRoom((current) =>
                 current ? { ...current, status: "CANCELLED" } : current,
               )
+            } else if (closeEvent.code === 4001) {
+              setError("Phòng này đang được mở ở một tab khác nên kết nối ở đây đã bị đóng.")
             }
+          }
 
-            if (message.event === "TIME_SYNC") {
-              const left = Number(message.data?.remaining_seconds)
+          socket.onerror = () => {
+            if (active) {
+              setConnection("disconnected")
+            }
+          }
 
-              if (Number.isFinite(left)) {
-                setSyncedDeadline(Date.now() + left * 1000)
+          socket.onmessage = (event) => {
+            if (!active) return
+
+            try {
+              const message = JSON.parse(event.data)
+
+              if (message.event === "ROOM_STATE") {
+                setRoom(message.data)
               }
-            }
 
-            if (message.event === "OPPONENT_TYPING") {
-              const typing = Boolean(message.data?.is_typing)
-
-              setOpponentTyping(typing)
-              window.clearTimeout(opponentTypingTimerRef.current)
-
-              // Phòng khi gói "ngừng gõ" bị mất, tự tắt chỉ báo sau một lúc.
-              if (typing) {
-                opponentTypingTimerRef.current = window.setTimeout(
-                  () => setOpponentTyping(false),
-                  OPPONENT_TYPING_TTL_MS,
+              if (
+                message.event === "JOIN_ROOM" &&
+                roomStatusRef.current === "PLAYING" &&
+                message.data?.user_id !== userId
+              ) {
+                pushEvent(
+                  `${message.data?.username || "Đối thủ"} đã vào lại phòng.`,
                 )
               }
-            }
 
-            if (message.event === "PROGRESS_UPDATE") {
-              // Backend đặt các trường này ở cấp ngoài cùng, không nằm trong "data".
-              const update = message.data ?? message
-
-              if (update.user_id) {
-                setProgress((current) => ({
-                  ...current,
-                  [update.user_id]: {
-                    passed: update.passed,
-                    total: update.total,
-                    percent: update.progress_percent,
-                  },
-                }))
-
-                if (update.user_id !== user.id) {
-                  pushEvent(
-                    `Đối thủ vượt ${update.passed}/${update.total} testcase.`,
-                  )
-                }
-              }
-            }
-
-            if (message.event === "GAME_OVER") {
-              const data = message.data || {}
-
-              setResult({
-                is_draw: false,
-                winner_id: data.winner_id,
-                winner_username: data.winner_username,
-                elo_change: data.elo_change || {},
-                completion_time: data.completion_time,
-              })
-              setOpponentTyping(false)
-              setRoom((current) =>
-                current
-                  ? {
-                      ...current,
-                      status: "FINISHED",
-                      winner_id: data.winner_id,
-                      finished_at: data.finished_at,
-                    }
-                  : current,
-              )
-              pushEvent(
-                data.winner_id === user.id
-                  ? "Bạn đã vượt qua tất cả testcase và giành chiến thắng!"
-                  : `${data.winner_username || "Đối thủ"} đã hoàn thành bài trước.`,
-                data.winner_id === user.id ? "success" : "warn",
-              )
-            }
-
-            if (message.event === "MATCH_DRAW") {
-              const data = message.data || {}
-              const eloChange = {}
-
-              for (const player of data.players || []) {
-                eloChange[player.user_id] = player.elo_change
-              }
-
-              setResult({
-                is_draw: true,
-                winner_id: null,
-                elo_change: eloChange,
-              })
-              setOpponentTyping(false)
-              setRoom((current) =>
-                current
-                  ? {
-                      ...current,
-                      status: "FINISHED",
-                      winner_id: null,
-                      finished_at: data.finished_at,
-                    }
-                  : current,
-              )
-              pushEvent(data.message || "Hết giờ, trận đấu hòa.", "warn")
-            }
-
-            if (message.event === "COUNTDOWN") {
-              setCountdown(message.data.value)
-            }
-
-            if (
-              ["COUNTDOWN_START", "COUNTDOWN_ABORTED"].includes(
-                message.event,
-              )
-            ) {
-              setCountdown(null)
-
-              if (message.event === "COUNTDOWN_START") {
-                setSyncedDeadline(null)
-                pushEvent("Trận đấu bắt đầu. Chúc bạn may mắn!", "success")
+              if (
+                ["JOIN_ROOM", "PLAYER_READY"].includes(message.event) &&
+                message.data?.players
+              ) {
                 setRoom((current) =>
                   current
                     ? {
                         ...current,
-                        status: "PLAYING",
-                        question: message.data.question,
+                        players: message.data.players,
                       }
                     : current,
                 )
               }
-            }
 
-            if (message.event === "ERROR") {
+              if (message.event === "PLAYER_LEFT") {
+                const leftId = message.data.user_id
+                const inMatch = roomStatusRef.current === "PLAYING"
+
+                setRoom((current) =>
+                  current
+                    ? {
+                        ...current,
+                        players: inMatch
+                          ? (current.players || []).map((player) =>
+                              player.user_id === leftId
+                                ? { ...player, left: true }
+                                : player,
+                            )
+                          : (current.players || []).filter(
+                              (player) => player.user_id !== leftId,
+                            ),
+                      }
+                    : current,
+                )
+
+                if (inMatch && leftId !== userId) {
+                  setOpponentTyping(false)
+                  pushEvent(
+                    `${message.data.username || "Đối thủ"} đã rời phòng.`,
+                    "warn",
+                  )
+                }
+              }
+
+              if (message.event === "ROOM_CANCELLED") {
+                setCountdown(null)
+                setRoom((current) =>
+                  current ? { ...current, status: "CANCELLED" } : current,
+                )
+              }
+
+              if (message.event === "TIME_SYNC") {
+                const left = Number(message.data?.remaining_seconds)
+
+                if (Number.isFinite(left)) {
+                  setSyncedDeadline(Date.now() + left * 1000)
+                }
+              }
+
+              if (message.event === "OPPONENT_TYPING") {
+                const typing = Boolean(message.data?.is_typing)
+
+                setOpponentTyping(typing)
+                window.clearTimeout(opponentTypingTimerRef.current)
+
+                // Phòng khi gói "ngừng gõ" bị mất, tự tắt chỉ báo sau một lúc.
+                if (typing) {
+                  opponentTypingTimerRef.current = window.setTimeout(
+                    () => setOpponentTyping(false),
+                    OPPONENT_TYPING_TTL_MS,
+                  )
+                }
+              }
+
+              if (message.event === "PROGRESS_UPDATE") {
+                // Backend đặt các trường này ở cấp ngoài cùng, không nằm trong "data".
+                const update = message.data ?? message
+
+                if (update.user_id) {
+                  setProgress((current) => ({
+                    ...current,
+                    [update.user_id]: {
+                      passed: update.passed,
+                      total: update.total,
+                      percent: update.progress_percent,
+                    },
+                  }))
+
+                  if (update.user_id !== userId) {
+                    pushEvent(
+                      `Đối thủ vượt ${update.passed}/${update.total} testcase.`,
+                    )
+                  }
+                }
+              }
+
+              if (message.event === "GAME_OVER") {
+                const data = message.data || {}
+
+                setResult({
+                  is_draw: false,
+                  winner_id: data.winner_id,
+                  winner_username: data.winner_username,
+                  elo_change: data.elo_change || {},
+                  completion_time: data.completion_time,
+                })
+                setOpponentTyping(false)
+                setRoom((current) =>
+                  current
+                    ? {
+                        ...current,
+                        status: "FINISHED",
+                        winner_id: data.winner_id,
+                        finished_at: data.finished_at,
+                      }
+                    : current,
+                )
+                pushEvent(
+                  data.winner_id === userId
+                    ? "Bạn đã vượt qua tất cả testcase và giành chiến thắng!"
+                    : `${data.winner_username || "Đối thủ"} đã hoàn thành bài trước.`,
+                  data.winner_id === userId ? "success" : "warn",
+                )
+              }
+
+              if (message.event === "MATCH_DRAW") {
+                const data = message.data || {}
+                const eloChange = {}
+
+                for (const player of data.players || []) {
+                  eloChange[player.user_id] = player.elo_change
+                }
+
+                setResult({
+                  is_draw: true,
+                  winner_id: null,
+                  elo_change: eloChange,
+                })
+                setOpponentTyping(false)
+                setRoom((current) =>
+                  current
+                    ? {
+                        ...current,
+                        status: "FINISHED",
+                        winner_id: null,
+                        finished_at: data.finished_at,
+                      }
+                    : current,
+                )
+                pushEvent(data.message || "Hết giờ, trận đấu hòa.", "warn")
+              }
+
+              if (message.event === "COUNTDOWN") {
+                setCountdown(message.data.value)
+              }
+
+              if (
+                ["COUNTDOWN_START", "COUNTDOWN_ABORTED"].includes(
+                  message.event,
+                )
+              ) {
+                setCountdown(null)
+
+                if (message.event === "COUNTDOWN_START") {
+                  setSyncedDeadline(null)
+                  pushEvent("Trận đấu bắt đầu. Chúc bạn may mắn!", "success")
+                  setRoom((current) =>
+                    current
+                      ? {
+                          ...current,
+                          status: "PLAYING",
+                          question: message.data.question,
+                        }
+                      : current,
+                  )
+                }
+              }
+
+              if (message.event === "ERROR") {
+                setError(
+                  message.data?.message ||
+                    "Phòng đã gặp lỗi.",
+                )
+              }
+            } catch {
               setError(
-                message.data?.message ||
-                  "Phòng đã gặp lỗi.",
+                "Không đọc được dữ liệu phòng từ máy chủ.",
               )
             }
-          } catch {
-            setError(
-              "Không đọc được dữ liệu phòng từ máy chủ.",
-            )
           }
         }
+
+        openSocket()
       } catch (err) {
         if (active) {
           setError(
@@ -517,10 +587,11 @@ export default function Room() {
 
     return () => {
       active = false
+      window.clearTimeout(reconnectTimer)
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [roomCode, user, loading])
+  }, [roomCode, userId, loading])
 
   useEffect(() => {
     roomStatusRef.current = room?.status ?? null
@@ -545,12 +616,50 @@ export default function Room() {
     if (loadedQuestionRef.current === questionId) return
 
     loadedQuestionRef.current = questionId
+
+    // Tải lại trang giữa trận thì khôi phục code đã gõ thay vì quay về starter_code.
+    let draft = null
+
+    try {
+      draft = JSON.parse(localStorage.getItem(`codeduel_draft:${userId}:${roomCode}:${questionId}`) || "null")
+    } catch {
+      draft = null
+    }
+
     setCodes({
-      cpp: starter.cpp ?? "",
-      python: starter.python ?? "",
-      java: starter.java ?? "",
+      cpp: draft?.cpp ?? starter.cpp ?? "",
+      python: draft?.python ?? starter.python ?? "",
+      java: draft?.java ?? starter.java ?? "",
     })
-  }, [room?.question])
+  }, [room?.question, roomCode, userId])
+
+  // Lưu nháp code trong lúc đang thi đấu; xóa khi trận kết thúc.
+  useEffect(() => {
+    const questionId = room?.question?.id
+
+    if (!questionId || loadedQuestionRef.current !== questionId) return undefined
+
+    const key = `codeduel_draft:${userId}:${roomCode}:${questionId}`
+
+    try {
+      if (room?.status === "FINISHED" || room?.status === "CANCELLED") {
+        localStorage.removeItem(key)
+        return undefined
+      }
+    } catch {
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(key, JSON.stringify(codes))
+      } catch {
+        // Hết dung lượng hoặc bị chặn lưu trữ: bỏ qua, chỉ mất tính năng khôi phục nháp.
+      }
+    }, 500)
+
+    return () => window.clearTimeout(timer)
+  }, [codes, room?.question?.id, room?.status, roomCode, userId])
 
   const handleEditorMount = (editor) => {
     editorRef.current = editor
@@ -721,7 +830,7 @@ export default function Room() {
       const apiOrigin = /^https?:\/\//i.test(configuredBase)
         ? new URL(configuredBase).origin
         : window.location.origin
-      const token = localStorage.getItem("token") || ""
+      const token = getToken() || ""
       const socket = new WebSocket(
         `${apiOrigin.replace(/^http/i, "ws")}/api/v1/rooms/ws/arena/${encodeURIComponent(roomCode)}?token=${encodeURIComponent(token)}`,
       )
@@ -746,6 +855,7 @@ export default function Room() {
     }
 
     setCancelling(true)
+    manualCloseRef.current = true
     setError("")
     window.clearTimeout(typingTimerRef.current)
     window.clearTimeout(opponentTypingTimerRef.current)
@@ -762,6 +872,7 @@ export default function Room() {
     if (!done) {
       setError("Chưa hủy được phòng. Hãy bấm Hủy đấu lần nữa.")
       setCancelling(false)
+      manualCloseRef.current = false
       return
     }
 
@@ -881,7 +992,9 @@ export default function Room() {
         <p>
           {connection === "connected"
             ? "Đã kết nối trực tiếp với phòng."
-            : "Đang kết nối với phòng…"}
+            : connection === "reconnecting"
+              ? "Mất kết nối, đang tự nối lại…"
+              : "Đang kết nối với phòng…"}
         </p>
       </div>
       )}
