@@ -75,3 +75,6 @@
   .confetti { display: none; }
   .match-result-won, .match-result-won .feature-icon { animation: none; }
 }
+/* --- Lớp phủ khi hết giờ (dùng lại khung của hộp xác nhận Reset) --- */
+.time-up-card h3 { display: flex; align-items: center; gap: 8px; }
+.time-up-wait { display: flex; align-items: center; gap: 8px; }

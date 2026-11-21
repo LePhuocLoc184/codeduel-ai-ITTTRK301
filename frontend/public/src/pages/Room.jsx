@@ -5,7 +5,9 @@ import {
   ArrowRight,
   Ban,
   Check,
+  Clock,
   Copy,
+  Loader2,
   Play,
   RotateCcw,
   Send,
@@ -38,6 +40,15 @@ const EDITOR_OPTIONS = {
   padding: { top: 12 },
 }
 
+// Hết giờ: khóa editor. Giữ hai object cố định (không tạo mới mỗi lần render) để Monaco không updateOptions liên tục.
+const EDITOR_OPTIONS_LOCKED = { ...EDITOR_OPTIONS, readOnly: true }
+
+// Hết giờ: hỏi lại server dồn dập (1,5 giây) trong 10 giây đầu; nếu server vẫn chưa chốt thì báo cho người chơi
+// và hỏi thưa lại (15 giây) để không bắn truy vấn liên tục vào backend. Người chơi vẫn bấm "Kiểm tra lại" được.
+const TIME_UP_RESYNC_MS = 1500
+const TIME_UP_STALLED_RESYNC_MS = 15000
+const TIME_UP_GRACE_MS = 10000
+
 // Khớp MATCH_DURATION_SECONDS (15 phút) trong backend/app/services/match_timer.py.
 // Chỉ dùng để tự đếm ngược khi chưa nhận được sự kiện TIME_SYNC từ server.
 const MATCH_DURATION_MS = 15 * 60 * 1000
@@ -50,6 +61,8 @@ const OPPONENT_TYPING_TTL_MS = 2000
 const TYPING_HEARTBEAT_MS = 1000
 // AC 3.2: chống spam, khóa nút Nộp bài tối thiểu 5 giây sau mỗi lần bấm.
 const SUBMIT_COOLDOWN_MS = 5000
+// Chu kỳ hỏi lại trạng thái phòng khi đang thi đấu, phòng khi lỡ mất GAME_OVER / MATCH_DRAW qua socket.
+const ROOM_RESYNC_MS = 3000
 // Số lần tự nối lại WebSocket tối đa khi mất kết nối giữa chừng.
 const MAX_RECONNECT_ATTEMPTS = 8
 const MAX_EVENTS = 40
@@ -222,6 +235,11 @@ export default function Room() {
   const [codes, setCodes] = useState({ cpp: "", python: "", java: "" })
   const loadedQuestionRef = useRef(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  // Đã quá hạn của trận (đồng hồ về 0) và server có chốt kịp hay không.
+  const [timeUp, setTimeUp] = useState(false)
+  const [timeUpStalled, setTimeUpStalled] = useState(false)
+  // false sau khi rời trang: chặn các lệnh gọi trễ (setTimeout sau khi nộp bài, resync...) chạy trên component đã gỡ.
+  const mountedRef = useRef(true)
 
   // Mốc kết thúc trận (ms) cập nhật theo TIME_SYNC của server.
   const [syncedDeadline, setSyncedDeadline] = useState(null)
@@ -280,6 +298,70 @@ export default function Room() {
       socketRef.current.send(JSON.stringify(payload))
     }
   }
+
+  // Dự phòng khi lỡ sự kiện kết thúc trận. Backend chỉ chờ gửi GAME_OVER tối đa 0,1 giây và không phát lại,
+  // nên nếu socket chậm / vừa rớt thì trình duyệt không bao giờ biết trận đã xong và kẹt ở màn thi đấu.
+  // Trạng thái thật nằm trong DB, hỏi lại qua REST rồi dựng màn kết quả từ đó.
+  const resyncRoomState = async () => {
+    if (!mountedRef.current || roomStatusRef.current !== "PLAYING") return
+
+    try {
+      const { data } = await api.get(`/api/v1/rooms/${roomCode}`)
+      const fresh = data?.data
+
+      // Trận có thể đã kết thúc trong lúc chờ phản hồi và socket đã kịp báo.
+      if (!fresh || !mountedRef.current || roomStatusRef.current !== "PLAYING") return
+      if (!["FINISHED", "CANCELLED"].includes(fresh.status)) return
+
+      setOpponentTyping(false)
+      setRoom(fresh)
+
+      if (fresh.status === "FINISHED") {
+        pushEvent(
+          !fresh.winner_id
+            ? "Hết giờ, trận đấu hòa."
+            : fresh.winner_id === userId
+              ? "Bạn đã giành chiến thắng!"
+              : "Đối thủ đã hoàn thành bài trước.",
+          fresh.winner_id === userId ? "success" : "warn",
+        )
+      }
+    } catch {
+      // Lỗi mạng tạm thời: lần hỏi lại sau sẽ thử tiếp.
+    }
+  }
+
+  const resyncRef = useRef(resyncRoomState)
+  resyncRef.current = resyncRoomState
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // Một vòng hỏi lại duy nhất; nhịp thay đổi theo tình huống (đang thi / vừa hết giờ / hết giờ mà server chưa chốt).
+  // timeUp và timeUpStalled là state khai báo phía trên nên dùng được ở đây.
+  useEffect(() => {
+    if (room?.status !== "PLAYING") return undefined
+
+    const everyMs = timeUp ? (timeUpStalled ? TIME_UP_STALLED_RESYNC_MS : TIME_UP_RESYNC_MS) : ROOM_RESYNC_MS
+    const timer = window.setInterval(() => resyncRef.current(), everyMs)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") resyncRef.current()
+    }
+
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
+
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
+    }
+  }, [room?.status, timeUp, timeUpStalled])
 
   useEffect(() => {
     if (loading || !userId) return undefined
@@ -691,7 +773,7 @@ export default function Room() {
 
   // Chạy thử (public testcase, không ghi DB) hoặc nộp bài chính thức (toàn bộ testcase).
   const judgeCode = async (kind) => {
-    if (judge.busy || !room?.question) return
+    if (judge.busy || !room?.question || timeUp) return
     if (kind === "submit" && Date.now() < submitLockedUntil) return
 
     if (!code.trim()) {
@@ -732,6 +814,9 @@ export default function Room() {
           `Bạn đã nộp bài: ${submitted.passed_test_cases}/${submitted.total_test_cases} testcase.`,
           submitted.status === "PASS" ? "success" : "info",
         )
+
+        // Chờ một nhịp cho GAME_OVER qua socket tới trước; nếu không tới thì hỏi lại trạng thái phòng.
+        window.setTimeout(() => resyncRef.current(), 700)
       }
     } catch (err) {
       setJudge({
@@ -746,6 +831,9 @@ export default function Room() {
           ),
         },
       })
+
+      // Nộp muộn bị từ chối vì đối thủ đã thắng trước: kiểm tra lại để chuyển sang màn kết quả.
+      if (kind === "submit") window.setTimeout(() => resyncRef.current(), 700)
     }
   }
 
@@ -948,6 +1036,43 @@ export default function Room() {
     (room?.status === "FINISHED"
       ? { is_draw: !room.winner_id, winner_id: room.winner_id, elo_change: restoredElo }
       : null)
+
+  // Hết giờ: một setTimeout duy nhất tới đúng mốc kết thúc (không dùng interval nên không chạy âm hay kích hoạt lặp).
+  // Cũng đúng khi tải lại trang vào một trận đã quá hạn: timeUp bật ngay, không kẹt ở màn làm bài.
+  useEffect(() => {
+    if (!matchDeadline) {
+      setTimeUp(false)
+      return undefined
+    }
+
+    const wait = matchDeadline - Date.now()
+
+    if (wait <= 0) {
+      setTimeUp(true)
+      return undefined
+    }
+
+    setTimeUp(false)
+    const timer = window.setTimeout(() => setTimeUp(true), wait)
+
+    return () => window.clearTimeout(timer)
+  }, [matchDeadline])
+
+  // Khi đã hết giờ mà server chưa báo kết thúc: hỏi lại liên tục một lúc ngắn rồi mới báo "chưa chốt".
+  // Nếu server chốt (FINISHED) thì isPlaying thành false, màn kết quả thay thế và effect này tự dọn.
+  useEffect(() => {
+    if (!timeUp || !isPlaying) {
+      setTimeUpStalled(false)
+      return undefined
+    }
+
+    resyncRef.current()
+    const stall = window.setTimeout(() => setTimeUpStalled(true), TIME_UP_GRACE_MS)
+
+    return () => window.clearTimeout(stall)
+  }, [timeUp, isPlaying])
+
+  const timeIsUp = isPlaying && timeUp
 
   if (!user && !loading) {
     return (
@@ -1234,6 +1359,7 @@ export default function Room() {
                             true,
                           )
                         }
+                        disabled={timeIsUp}
                       >
                         <RotateCcw size={14} />
                         Reset Code
@@ -1243,7 +1369,7 @@ export default function Room() {
                         type="button"
                         className="editor-reset-button"
                         onClick={() => judgeCode("run")}
-                        disabled={Boolean(judge.busy)}
+                        disabled={Boolean(judge.busy) || timeIsUp}
                       >
                         <Play size={14} />
                         {judge.busy === "run" ? "Đang chạy..." : "Chạy thử"}
@@ -1253,7 +1379,7 @@ export default function Room() {
                         type="button"
                         className="editor-submit-button"
                         onClick={() => judgeCode("submit")}
-                        disabled={Boolean(judge.busy) || cooldownLeft > 0}
+                        disabled={Boolean(judge.busy) || cooldownLeft > 0 || timeIsUp}
                       >
                         <Send size={14} />
                         {judge.busy === "submit"
@@ -1302,9 +1428,50 @@ export default function Room() {
                       onMount={
                         handleEditorMount
                       }
-                      options={EDITOR_OPTIONS}
+                      options={timeIsUp ? EDITOR_OPTIONS_LOCKED : EDITOR_OPTIONS}
                     />
                   </div>
+
+                  {timeIsUp && (
+                    <div className="reset-confirm-overlay" role="alertdialog" aria-live="assertive">
+                      <div className="reset-confirm time-up-card">
+                        <h3>
+                          <Clock size={18} /> Đã hết giờ
+                        </h3>
+
+                        {!timeUpStalled ? (
+                          <p className="time-up-wait">
+                            <Loader2 size={15} className="console-spin" />
+                            Đang chờ máy chủ chốt kết quả trận…
+                          </p>
+                        ) : (
+                          <p>
+                            Máy chủ chưa chốt kết quả của trận này nên phòng vẫn bị giữ ở trạng thái đang
+                            diễn ra. Bạn không thể làm bài thêm, và chưa tạo được phòng mới hay tìm trận
+                            cho đến khi máy chủ chốt trận hoặc phòng được dọn dẹp.
+                          </p>
+                        )}
+
+                        <div className="reset-confirm-actions">
+                          <button
+                            type="button"
+                            className="button button-ghost"
+                            onClick={() => resyncRef.current()}
+                          >
+                            Kiểm tra lại
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button"
+                            onClick={() => navigate("/arena")}
+                          >
+                            Về đấu trường
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {showResetConfirm && (
                     <div className="reset-confirm-overlay">
