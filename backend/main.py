@@ -20,6 +20,7 @@ from app.routers.runner import router as runner_router
 # Router Execute điều phối chấm bài/DB, dùng lại phần lưu file và compile của Runner.
 from app.routers.execute import router as execute_router
 from app.services.matchmaking_worker import matchmaking_worker
+from app.services.match_timer import resume_match_timers
 
 
 @asynccontextmanager
@@ -30,6 +31,9 @@ async def lifespan(app: FastAPI):
         # tạo bảng bất đồng bộ
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Đã khởi tạo các bảng thành công!")
+    
+    recovered = await resume_match_timers()
+    print(f"⏱️ Đã khôi phục timer cho {recovered} trận đang diễn ra")
     
     worker_task = asyncio.create_task(matchmaking_worker())
     print("⚡ Đã khởi chạy Matchmaking Background Worker!")
