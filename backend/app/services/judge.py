@@ -51,7 +51,22 @@ def run_case(command: list[str], directory: Path, stdin: str,
         return {"status": "RUNTIME_ERROR", "actual_output": "",
                 "execution_time_ms": 0.0, "memory_used_mb": 0.0,
                 "error_message": "Worker không thể chạy testcase"}
-    return json.loads(stdout)
+    result = json.loads(stdout)
+    # Worker chỉ báo trạng thái thực thi; việc so đáp án thuộc evaluator.
+    # Nếu worker trả JSON thiếu/sai trường, xử lý như lỗi chạy case hiện tại
+    # để không làm mất số case đã đúng hoặc phát sinh KeyError ra API.
+    if (not isinstance(result, dict)
+            or result.get("status") not in ("PASS", "TLE", "MLE", "RUNTIME_ERROR")
+            or not isinstance(result.get("actual_output"), str)
+            or "error_message" not in result
+            or (result["error_message"] is not None
+                and not isinstance(result["error_message"], str))):
+        raise ValueError("Kết quả worker không đúng định dạng")
+    for field in ("execution_time_ms", "memory_used_mb"):
+        value = result.get(field)
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise ValueError("Số đo của worker không hợp lệ")
+    return result
 
 
 def evaluate_testcases(command: list[str], directory: Path | str,
@@ -82,7 +97,15 @@ def evaluate_testcases(command: list[str], directory: Path | str,
 
     for index, case in enumerate(test_cases, start=1):
         # AC 3.1: mỗi input được đưa nguyên vẹn vào stdin của một tiến trình mới.
-        result = run_case(command, Path(directory), case["input"], time_limit, memory_limit_mb)
+        try:
+            result = run_case(command, Path(directory), case["input"], time_limit, memory_limit_mb)
+        except (OSError, ValueError, subprocess.SubprocessError, psutil.Error):
+            # Ví dụ worker không khởi động được ở case thứ 3: giữ 2 case đã
+            # PASS, báo lỗi ở case thứ 3 và dừng, không reset thành 0 case đúng.
+            # Không trả nội dung exception hạ tầng vì có thể chứa đường dẫn máy.
+            result = {"status": "RUNTIME_ERROR", "actual_output": "",
+                      "execution_time_ms": 0.0, "memory_used_mb": 0.0,
+                      "error_message": "Không thể chạy worker cho testcase"}
         # AC 3.2: chỉ bỏ khoảng trắng ở HAI ĐẦU, giữ nguyên khoảng trắng bên trong.
         # Ví dụ " 3\\n" khớp "3", nhưng "1  2" không khớp "1 2".
         passed = (result["status"] == "PASS"
