@@ -106,6 +106,18 @@ class ConnectionManager:
 
         await asyncio.gather(*(_close(conn) for conn in connections))
         
+    
+    def is_playing(self, room_code: str) -> bool:
+        return self.room_states.get(room_code) == "PLAYING"
+
+    def opponent_id(self, room_code: str, user_id: UUID) -> UUID | None:
+        room = self.active_rooms.get(room_code)
+        if not room:
+            return None
+        for uid in room:
+            if uid != user_id:
+                return uid
+        return None
         
     async def broadcast(self, room_code: str, message_dict: dict):
         """Gửi song song tới tất cả người chơi trong phòng."""
