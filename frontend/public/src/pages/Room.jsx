@@ -15,6 +15,7 @@ import {
   Swords,
   Trophy,
   Users,
+  Bot,
 } from "lucide-react"
 import Editor from "@monaco-editor/react"
 import api, { getToken, getApiErrorMessage } from "../api/axios"
@@ -22,6 +23,8 @@ import { useAuth } from "../context/AuthContext"
 import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
 import ArenaSidebar from "../components/arena/ArenaSidebar"
+import AIReviewPanel from "../components/arena/AIReviewPanel"
+import { ConnectionToast, CountdownOverlay } from "../components/arena/RoomOverlays"
 import "./Room.css"
 
 // Giữ cố định tham chiếu: nếu tạo object mới mỗi lần render, Monaco sẽ updateOptions sau mỗi phím gõ.
@@ -57,14 +60,15 @@ const JUDGE_TIMEOUT_MS = 60000
 const TYPING_IDLE_MS = 1500
 // AC 4.2: chỉ báo "đối thủ đang gõ" tự biến mất sau 2 giây nếu không có gói mới.
 const OPPONENT_TYPING_TTL_MS = 2000
-// Khi đang gõ liên tục, gửi lại gói "đang gõ" mỗi giây để phía nhận không tự tắt chỉ báo.
-const TYPING_HEARTBEAT_MS = 1000
+// AC 1.3: khi đang gõ liên tục, throttle gói "đang gõ" tối đa 1 lần mỗi 1,5 giây (không gửi kèm mã nguồn).
+const TYPING_HEARTBEAT_MS = 1500
 // AC 3.2: chống spam, khóa nút Nộp bài tối thiểu 5 giây sau mỗi lần bấm.
 const SUBMIT_COOLDOWN_MS = 5000
 // Chu kỳ hỏi lại trạng thái phòng khi đang thi đấu, phòng khi lỡ mất GAME_OVER / MATCH_DRAW qua socket.
 const ROOM_RESYNC_MS = 3000
-// Số lần tự nối lại WebSocket tối đa khi mất kết nối giữa chừng.
-const MAX_RECONNECT_ATTEMPTS = 8
+// AC 1.2: tự nối lại WebSocket tối đa 3 lần, cách nhau 2 giây.
+const MAX_RECONNECT_ATTEMPTS = 3
+const RECONNECT_DELAY_MS = 2000
 const MAX_EVENTS = 40
 
 // Server trả ISO có múi giờ; nếu thiếu thì coi là UTC để không lệch giờ theo máy người dùng.
@@ -118,10 +122,16 @@ function Confetti() {
   )
 }
 
-function MatchResult({ result, players, userId }) {
+function MatchResult({ result, players, userId, roomCode, question, language, code, theme }) {
+  const [tab, setTab] = useState("result")
   const won = Boolean(userId) && result.winner_id === userId
   const winner = players.find((player) => player.user_id === result.winner_id)
   const winnerName = result.winner_username || winner?.username || "Đối thủ"
+
+  // AC 3.2: nhãn VICTORY / DEFEAT / DRAW kèm biến động Rating.
+  const outcome = result.is_draw ? "draw" : won ? "win" : "lose"
+  const badge = { win: "VICTORY", lose: "DEFEAT", draw: "DRAW" }[outcome]
+  const outcomeText = { win: "thắng", lose: "thua", draw: "hòa" }[outcome]
 
   const title = result.is_draw
     ? "Trận đấu hòa"
@@ -138,72 +148,111 @@ function MatchResult({ result, players, userId }) {
   const seconds = Number(result.completion_time)
 
   const myDelta = result.elo_change?.[userId]
+  const reviewing = tab === "review"
 
   return (
-    <div className={`arena-panel match-result${won ? " match-result-won" : ""}`}>
+    <div
+      className={`arena-panel match-result${won ? " match-result-won" : ""}${reviewing ? " match-result-wide" : ""}`}
+      role="dialog"
+      aria-label="Kết quả trận đấu"
+    >
       {won && <Confetti />}
 
-      {won && <span className="victory-banner">CHIẾN THẮNG</span>}
-
-      <div
-        className={`feature-icon ${won ? "green" : result.is_draw ? "blue" : "purple"}`}
-      >
-        {won || result.is_draw ? <Trophy /> : <Swords />}
+      <div style={{ textAlign: "center" }}>
+        <span className={`result-badge result-badge-${outcome}`}>{badge}</span>
       </div>
 
-      <h1>{title}</h1>
-
-      {won && typeof myDelta === "number" && myDelta > 0 && (
-        <p className="victory-elo">+{myDelta} điểm xếp hạng</p>
-      )}
-
-      <p>{subtitle}</p>
-
-      <div className="result-players">
-        {players.map((player) => {
-          const delta = result.elo_change?.[player.user_id]
-
-          return (
-            <div className="result-player" key={player.user_id}>
-              <span className="rank-avatar">
-                {player.username?.slice(0, 1).toUpperCase()}
-              </span>
-
-              <span>
-                <b>
-                  {player.username}
-                  {player.user_id === userId ? " (Bạn)" : ""}
-                </b>
-
-                <small>
-                  {player.user_id === result.winner_id
-                    ? "Người thắng"
-                    : result.is_draw
-                      ? "Hòa"
-                      : "Người thua"}
-                </small>
-              </span>
-
-              {typeof delta === "number" && (
-                <em className={delta > 0 ? "up" : delta < 0 ? "down" : ""}>
-                  {delta > 0 ? `+${delta}` : delta} điểm
-                </em>
-              )}
-            </div>
-          )
-        })}
+      <div className="result-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={!reviewing} className={!reviewing ? "active" : ""} onClick={() => setTab("result")}>
+          Kết quả
+        </button>
+        <button type="button" role="tab" aria-selected={reviewing} className={reviewing ? "active" : ""} onClick={() => setTab("review")}>
+          AI Review
+        </button>
       </div>
 
-      {Number.isFinite(seconds) && seconds > 0 && !result.is_draw && (
-        <p className="result-time">
-          Thời gian hoàn thành: {Math.floor(seconds / 60)}p{" "}
-          {Math.round(seconds % 60)}s
-        </p>
+      {reviewing ? (
+        <AIReviewPanel
+          roomCode={roomCode}
+          userId={userId}
+          question={question}
+          language={language}
+          code={code}
+          outcome={outcomeText}
+          theme={theme}
+        />
+      ) : (
+        <>
+          <div
+            className={`feature-icon ${won ? "green" : result.is_draw ? "blue" : "purple"}`}
+          >
+            {won || result.is_draw ? <Trophy /> : <Swords />}
+          </div>
+
+          <h1>{title}</h1>
+
+          {typeof myDelta === "number" && (
+            <p className={`result-rating ${myDelta > 0 ? "up" : myDelta < 0 ? "down" : "even"}`}>
+              {myDelta > 0 ? `+${myDelta}` : myDelta} Rating
+            </p>
+          )}
+
+          <p>{subtitle}</p>
+
+          <div className="result-players">
+            {players.map((player) => {
+              const delta = result.elo_change?.[player.user_id]
+
+              return (
+                <div className="result-player" key={player.user_id}>
+                  <span className="rank-avatar">
+                    {player.username?.slice(0, 1).toUpperCase()}
+                  </span>
+
+                  <span>
+                    <b>
+                      {player.username}
+                      {player.user_id === userId ? " (Bạn)" : ""}
+                    </b>
+
+                    <small>
+                      {player.user_id === result.winner_id
+                        ? "Người thắng"
+                        : result.is_draw
+                          ? "Hòa"
+                          : "Người thua"}
+                    </small>
+                  </span>
+
+                  {typeof delta === "number" && (
+                    <em className={delta > 0 ? "up" : delta < 0 ? "down" : ""}>
+                      {delta > 0 ? `+${delta}` : delta} Rating
+                    </em>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {Number.isFinite(seconds) && seconds > 0 && !result.is_draw && (
+            <p className="result-time">
+              Thời gian hoàn thành: {Math.floor(seconds / 60)}p{" "}
+              {Math.round(seconds % 60)}s
+            </p>
+          )}
+        </>
       )}
 
-      <Link className="button" to="/arena">
-        Về đấu trường <ArrowRight size={16} />
-      </Link>
+      {/* AC 3.3: hai nút điều hướng. */}
+      <div className="result-actions">
+        <Link className="button button-ghost" to="/home">
+          Về Dashboard <ArrowRight size={16} />
+        </Link>
+
+        <button type="button" className="button" onClick={() => setTab(reviewing ? "result" : "review")}>
+          <Bot size={16} /> {reviewing ? "Xem kết quả trận" : "Phân tích Code bằng AI"}
+        </button>
+      </div>
     </div>
   )
 }
@@ -219,6 +268,7 @@ export default function Room() {
   const [room, setRoom] = useState(null)
   const [error, setError] = useState("")
   const [connection, setConnection] = useState("connecting")
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const [countdown, setCountdown] = useState(null)
   const [copied, setCopied] = useState(false)
 
@@ -402,6 +452,7 @@ export default function Room() {
           socket.onopen = () => {
             if (active) {
               attempts = 0
+              setReconnectAttempt(0)
               setConnection("connected")
             }
           }
@@ -418,10 +469,11 @@ export default function Room() {
 
             if (!refused && !roomOver && !manualCloseRef.current && attempts < MAX_RECONNECT_ATTEMPTS) {
               attempts += 1
+              setReconnectAttempt(attempts)
               setConnection("reconnecting")
               reconnectTimer = window.setTimeout(() => {
                 if (active && !manualCloseRef.current) openSocket()
-              }, Math.min(1000 * attempts, 5000))
+              }, RECONNECT_DELAY_MS)
             }
 
             // Mã đóng do backend đặt trong arena_websocket.
@@ -552,7 +604,7 @@ export default function Room() {
 
                   if (update.user_id !== userId) {
                     pushEvent(
-                      `Đối thủ vượt ${update.passed}/${update.total} testcase.`,
+                      `Đối thủ vừa nộp bài (Passed ${update.passed}/${update.total} testcases).`,
                     )
                   }
                 }
@@ -1098,6 +1150,17 @@ export default function Room() {
     <section
       className={`arena-page room-arena-page${isPlaying ? " room-arena-playing" : ""}`}
     >
+      <CountdownOverlay value={room?.status === "WAITING" ? countdown : null} />
+      <ConnectionToast
+        state={connection}
+        attempt={reconnectAttempt}
+        max={MAX_RECONNECT_ATTEMPTS}
+        failed={
+          connection === "disconnected" &&
+          reconnectAttempt >= MAX_RECONNECT_ATTEMPTS &&
+          !["FINISHED", "CANCELLED"].includes(room?.status)
+        }
+      />
       {!isPlaying && (
       <div className="arena-heading">
         <Link
@@ -1273,6 +1336,11 @@ export default function Room() {
               result={finalResult}
               players={room.players || []}
               userId={user?.id}
+              roomCode={roomCode}
+              question={question}
+              language={language}
+              code={codes[language]}
+              theme={theme}
             />
           )}
 
