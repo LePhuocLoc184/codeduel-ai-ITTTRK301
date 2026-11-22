@@ -60,11 +60,24 @@ export default function Matchmaking() {
   const [countdown, setCountdown] = useState(DEFAULT_COUNTDOWN_SECONDS)
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
+  // Điểm hiện tại của chính mình, lấy mới từ backend: `user.rating` trong AuthContext chỉ là bản chụp
+  // lúc mở web / đăng nhập nên không đổi sau khi trận đấu kết thúc. undefined = đang tải.
+  const [myRating, setMyRating] = useState(undefined)
 
   const phaseRef = useRef("checking")
   const mountedRef = useRef(false)
   const startedAtRef = useRef(null)
   const setPhase = (next) => { phaseRef.current = next; setPhaseState(next) }
+
+  // Mỗi lần vào trang tìm trận, lấy lại rating mới nhất của bản thân (giống ProfileCard).
+  useEffect(() => {
+    if (loading || !userId) return undefined
+    let active = true
+    api.get("/api/v1/users/me")
+      .then(({ data }) => { if (active) setMyRating(data.data?.rating) })
+      .catch(() => { if (active) setMyRating(null) })
+    return () => { active = false }
+  }, [userId, loading, attempt])
 
   // Hỏi trạng thái hàng đợi định kỳ. Trang này không tự "vào hàng đợi": việc đó làm ở Arena,
   // nên mở/tải lại trang vẫn nối lại đúng lượt đang chờ (hoặc quay về Arena nếu không có lượt nào).
@@ -219,7 +232,7 @@ export default function Matchmaking() {
     <p className="mm-sub" role="status" aria-live="polite">{found ? `Trận đấu bắt đầu sau ${Math.max(countdown, 0)} giây. Hãy chuẩn bị tinh thần!` : "Hệ thống đang ghép bạn với người chơi có trình độ tương đương."}</p>
 
     <div className="mm-versus">
-      <PlayerCard name={user.username} rating={user.rating} avatarUrl={user.avatar_url} tag="BẠN" found={found} />
+      <PlayerCard name={user.username} rating={myRating === undefined ? null : (myRating ?? user.rating)} avatarUrl={user.avatar_url} tag="BẠN" found={found} />
       <div className={`mm-vs${found ? " is-found" : ""}`} aria-hidden="true"><i /><i /><span>VS</span></div>
       {found && opponent
         ? <PlayerCard name={opponent.username} rating={opponent.rating} avatarUrl={opponent.avatar_url} tag="ĐỐI THỦ" found />

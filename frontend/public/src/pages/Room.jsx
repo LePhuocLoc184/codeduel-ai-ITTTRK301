@@ -634,6 +634,9 @@ export default function Room() {
                           ...current,
                           status: "PLAYING",
                           question: message.data.question,
+                          // COUNTDOWN_START không kèm started_at (và backend không phát TIME_SYNC cho trận mới),
+                          // nên lấy lúc nhận sự kiện làm mốc bắt đầu để đồng hồ chạy ngay thay vì kẹt ở --:--.
+                          started_at: new Date().toISOString(),
                         }
                       : current,
                   )
