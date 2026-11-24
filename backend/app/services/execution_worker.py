@@ -87,7 +87,13 @@ def execute_case(command: list[str], directory: str, stdin: str,
         def set_limits():
             # AC 2.1: trần bộ nhớ ẢO, không phải chỉ heap hay RAM RSS.
             # Đặt cả soft/hard limit để code con không tự nâng lại giới hạn.
-            resource.setrlimit(resource.RLIMIT_AS, (memory_limit_bytes, memory_limit_bytes))
+            executable = os.path.basename(command[0]).lower()
+            is_java = executable == "java" or executable == "java.exe"
+            # JVM cần một không gian địa chỉ ảo lớn hơn heap/Xmx ở mức thấp.
+            # Giữ RLIMIT_AS cho C++/Python và để Java tự giới hạn heap bằng -Xmx;
+            # peak RSS sau khi chạy được dùng để kiểm tra trần bộ nhớ phía dưới.
+            if not is_java:
+                resource.setrlimit(resource.RLIMIT_AS, (memory_limit_bytes, memory_limit_bytes))
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
             resource.setrlimit(resource.RLIMIT_FSIZE, (OUTPUT_LIMIT_BYTES, OUTPUT_LIMIT_BYTES))
             # Gửi PID qua pipe để sau subprocess.run vẫn biết nhóm nào cần dọn.
@@ -174,7 +180,7 @@ def execute_case(command: list[str], directory: str, stdin: str,
         err.seek(0)
         stdout = out.read(OUTPUT_LIMIT_BYTES).decode("utf-8", errors="replace")
         stderr = err.read(OUTPUT_LIMIT_BYTES).decode("utf-8", errors="replace")
-        if memory_exceeded.is_set():
+        if memory_exceeded.is_set() or peak_mb > memory_limit_mb:
             status, error = "MLE", "Vượt giới hạn bộ nhớ"
         elif output_exceeded.is_set():
             status, error = "RUNTIME_ERROR", "Output vượt giới hạn 1 MB"

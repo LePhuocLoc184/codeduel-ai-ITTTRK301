@@ -178,9 +178,17 @@ def judge_code(code_content: str, language: str, user_id: UUID,
         if language == "python":
             command = [sys.executable, "-I", str(path)]
         elif language == "java":
-            # -Xmx giới hạn heap; RLIMIT_AS trên Linux giới hạn toàn bộ không gian
-            # địa chỉ của JVM. Với mức thấp (như 128 MB), JVM có thể không khởi động.
-            command = ["java", f"-Xmx{memory_limit}m", "-cp", str(path.parent), "Main"]
+            # Giữ heap dưới trần đề bài để chừa bộ nhớ cho JVM runtime/native.
+            java_heap_mb = max(16, int(memory_limit * 0.75))
+            command = [
+                "java",
+                "-XX:+UseSerialGC",
+                f"-Xms16m",
+                f"-Xmx{java_heap_mb}m",
+                "-cp",
+                str(path.parent),
+                "Main",
+            ]
         else:
             command = [compiled["executable_path"]]
         return evaluate_testcases(command, path.parent, cases, time_limit, memory_limit)
