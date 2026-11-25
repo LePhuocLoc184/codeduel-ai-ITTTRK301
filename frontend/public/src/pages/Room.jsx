@@ -15,7 +15,6 @@ import {
   Swords,
   Trophy,
   Users,
-  Bot,
 } from "lucide-react"
 import Editor from "@monaco-editor/react"
 import api, { getToken, getApiErrorMessage } from "../api/axios"
@@ -23,8 +22,7 @@ import { useAuth } from "../context/AuthContext"
 import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
 import ArenaSidebar from "../components/arena/ArenaSidebar"
-import AIReviewPanel from "../components/arena/AIReviewPanel"
-import { ConnectionToast, CountdownOverlay } from "../components/arena/RoomOverlays"
+import { ConnectionToast, CountdownOverlay, RoomEventToast } from "../components/arena/RoomOverlays"
 import "./Room.css"
 
 // Giữ cố định tham chiếu: nếu tạo object mới mỗi lần render, Monaco sẽ updateOptions sau mỗi phím gõ.
@@ -122,8 +120,7 @@ function Confetti() {
   )
 }
 
-function MatchResult({ result, players, userId, roomCode, question, language, code, theme }) {
-  const [tab, setTab] = useState("result")
+function MatchResult({ result, players, userId }) {
   const won = Boolean(userId) && result.winner_id === userId
   const winner = players.find((player) => player.user_id === result.winner_id)
   const winnerName = result.winner_username || winner?.username || "Đối thủ"
@@ -131,7 +128,6 @@ function MatchResult({ result, players, userId, roomCode, question, language, co
   // AC 3.2: nhãn VICTORY / DEFEAT / DRAW kèm biến động Rating.
   const outcome = result.is_draw ? "draw" : won ? "win" : "lose"
   const badge = { win: "VICTORY", lose: "DEFEAT", draw: "DRAW" }[outcome]
-  const outcomeText = { win: "thắng", lose: "thua", draw: "hòa" }[outcome]
 
   const title = result.is_draw
     ? "Trận đấu hòa"
@@ -148,11 +144,9 @@ function MatchResult({ result, players, userId, roomCode, question, language, co
   const seconds = Number(result.completion_time)
 
   const myDelta = result.elo_change?.[userId]
-  const reviewing = tab === "review"
-
   return (
     <div
-      className={`arena-panel match-result${won ? " match-result-won" : ""}${reviewing ? " match-result-wide" : ""}`}
+      className={`arena-panel match-result${won ? " match-result-won" : ""}`}
       role="dialog"
       aria-label="Kết quả trận đấu"
     >
@@ -162,27 +156,7 @@ function MatchResult({ result, players, userId, roomCode, question, language, co
         <span className={`result-badge result-badge-${outcome}`}>{badge}</span>
       </div>
 
-      <div className="result-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={!reviewing} className={!reviewing ? "active" : ""} onClick={() => setTab("result")}>
-          Kết quả
-        </button>
-        <button type="button" role="tab" aria-selected={reviewing} className={reviewing ? "active" : ""} onClick={() => setTab("review")}>
-          AI Review
-        </button>
-      </div>
-
-      {reviewing ? (
-        <AIReviewPanel
-          roomCode={roomCode}
-          userId={userId}
-          question={question}
-          language={language}
-          code={code}
-          outcome={outcomeText}
-          theme={theme}
-        />
-      ) : (
-        <>
+      <>
           <div
             className={`feature-icon ${won ? "green" : result.is_draw ? "blue" : "purple"}`}
           >
@@ -240,8 +214,7 @@ function MatchResult({ result, players, userId, roomCode, question, language, co
               {Math.round(seconds % 60)}s
             </p>
           )}
-        </>
-      )}
+      </>
 
       {/* AC 3.3: hai nút điều hướng. */}
       <div className="result-actions">
@@ -249,9 +222,6 @@ function MatchResult({ result, players, userId, roomCode, question, language, co
           Về Dashboard <ArrowRight size={16} />
         </Link>
 
-        <button type="button" className="button" onClick={() => setTab(reviewing ? "result" : "review")}>
-          <Bot size={16} /> {reviewing ? "Xem kết quả trận" : "Phân tích Code bằng AI"}
-        </button>
       </div>
     </div>
   )
@@ -270,6 +240,9 @@ export default function Room() {
   const [connection, setConnection] = useState("connecting")
   const [reconnectAttempt, setReconnectAttempt] = useState(0)
   const [countdown, setCountdown] = useState(null)
+  const [roomNotice, setRoomNotice] = useState(null)
+  const roomNoticeTimerRef = useRef(null)
+  const roomNoticeIdRef = useRef(0)
   const [copied, setCopied] = useState(false)
 
   const [language, setLanguage] = useState(() => {
@@ -342,6 +315,20 @@ export default function Room() {
     const entry = { id: eventIdRef.current, at: Date.now(), text, tone }
     setEvents((current) => [entry, ...current].slice(0, MAX_EVENTS))
   }
+
+  const notifyRoomEvent = (text, tone = "info", busy = false, title = "") => {
+    window.clearTimeout(roomNoticeTimerRef.current)
+    roomNoticeIdRef.current += 1
+    const id = roomNoticeIdRef.current
+    setRoomNotice({ id, text, tone, busy, title })
+    if (!busy) {
+      roomNoticeTimerRef.current = window.setTimeout(() => {
+        setRoomNotice((current) => current?.id === id ? null : current)
+      }, 3500)
+    }
+  }
+
+  useEffect(() => () => window.clearTimeout(roomNoticeTimerRef.current), [])
 
   const sendSocket = (payload) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -526,6 +513,23 @@ export default function Room() {
                       }
                     : current,
                 )
+                if (message.event === "PLAYER_READY") {
+                  const players = message.data.players
+                  const readyPlayer = players.find(
+                    (player) => player.user_id === message.data.user_id,
+                  )
+                  const allReady = players.length === 2 && players.every((player) => player.is_ready)
+                  const text = allReady
+                    ? "Cả hai đã sẵn sàng. AI bắt đầu tạo đề thi."
+                    : `${readyPlayer?.username || "Một người chơi"} đã sẵn sàng. Đang chờ đối thủ.`
+                  pushEvent(text, allReady ? "success" : "info")
+                  notifyRoomEvent(
+                    text,
+                    allReady ? "success" : "info",
+                    allReady,
+                    allReady ? "Cả hai đã sẵn sàng" : "Bạn đã sẵn sàng",
+                  )
+                }
               }
 
               if (message.event === "PLAYER_LEFT") {
@@ -556,10 +560,14 @@ export default function Room() {
                     "warn",
                   )
                 }
+                if (!inMatch) {
+                  notifyRoomEvent(`${message.data.username || "Đối thủ"} đã rời phòng.`, "warning", false, "Đối thủ rời phòng")
+                }
               }
 
               if (message.event === "ROOM_CANCELLED") {
                 setCountdown(null)
+                notifyRoomEvent(message.data?.message || "Phòng đã bị hủy.", "warning", false, "Phòng đã bị hủy")
                 setRoom((current) =>
                   current ? { ...current, status: "CANCELLED" } : current,
                 )
@@ -668,6 +676,27 @@ export default function Room() {
 
               if (message.event === "COUNTDOWN") {
                 setCountdown(message.data.value)
+                const text = `Bắt đầu sau ${message.data.value} giây.`
+                pushEvent(text)
+                notifyRoomEvent(text, "info", false, "Sắp vào trận")
+              }
+
+              if (message.event === "AI_GENERATING") {
+                setError("")
+                setCountdown(null)
+                const text = "AI đang tạo và kiểm tra đề thi."
+                pushEvent(text)
+                notifyRoomEvent(text, "info", true, "AI đang ra đề")
+              }
+
+              if (message.event === "QUESTION_READY") {
+                const fromAI = message.data?.source === "AI"
+                const title = message.data?.question_title
+                const text = fromAI
+                  ? `AI đã tạo và lưu đề${title ? ` “${title}”` : ""}. Trận đấu sắp bắt đầu.`
+                  : `Đã chọn đề dự phòng${title ? ` “${title}”` : ""}. Trận đấu sắp bắt đầu.`
+                pushEvent(text, "success")
+                notifyRoomEvent(text, "success", false, fromAI ? "Đề thi đã sẵn sàng" : "Đã chọn đề dự phòng")
               }
 
               if (
@@ -679,7 +708,9 @@ export default function Room() {
 
                 if (message.event === "COUNTDOWN_START") {
                   setSyncedDeadline(null)
-                  pushEvent("Trận đấu bắt đầu. Chúc bạn may mắn!", "success")
+                  const text = "Trận đấu bắt đầu. Chúc bạn may mắn!"
+                  pushEvent(text, "success")
+                  notifyRoomEvent(text, "success", false, "Trận đấu bắt đầu")
                   setRoom((current) =>
                     current
                       ? {
@@ -692,14 +723,19 @@ export default function Room() {
                         }
                       : current,
                   )
+                } else {
+                  const text = message.data?.message || "Đếm ngược đã bị hủy."
+                  pushEvent(text, "warning")
+                  notifyRoomEvent(text, "warning", false, "Đếm ngược đã dừng")
                 }
               }
 
               if (message.event === "ERROR") {
-                setError(
-                  message.data?.message ||
-                    "Phòng đã gặp lỗi.",
-                )
+                setCountdown(null)
+                const text = message.data?.message || "Phòng đã gặp lỗi."
+                setError(text)
+                pushEvent(text, "warning")
+                notifyRoomEvent(text, "warning", false, "Chưa thể bắt đầu trận")
               }
             } catch {
               setError(
@@ -1151,6 +1187,7 @@ export default function Room() {
       className={`arena-page room-arena-page${isPlaying ? " room-arena-playing" : ""}`}
     >
       <CountdownOverlay value={room?.status === "WAITING" ? countdown : null} />
+      <RoomEventToast event={roomNotice} />
       <ConnectionToast
         state={connection}
         attempt={reconnectAttempt}
@@ -1336,11 +1373,6 @@ export default function Room() {
               result={finalResult}
               players={room.players || []}
               userId={user?.id}
-              roomCode={roomCode}
-              question={question}
-              language={language}
-              code={codes[language]}
-              theme={theme}
             />
           )}
 
