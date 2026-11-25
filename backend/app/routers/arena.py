@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Query, WebSocket, WebSocketDisconnect, status
@@ -11,10 +12,14 @@ from app.dependencies.auth import get_current_user, get_user_from_token
 from app.models import ProblemSet, Question, Room, RoomPlayer, User
 from app.schemas.response import BaseResponse
 from app.schemas.rooms import CustomRoomCreateRequest, JoinRoomRequest
+from app.services.match_timer import start_match_timer
 from app.services.question_service import pick_question
 from app.services.room_service import generate_unique_room_code, get_active_room
 
 router = APIRouter(prefix="/api/v1/rooms", tags=["Rooms"])
+
+# AC 1.2: chỉ chuyển tiếp tối đa 1 tín hiệu typing mỗi giây cho mỗi người chơi
+TYPING_THROTTLE_SECONDS = 1.0
 
 
 def public_test_cases(test_cases: object) -> list[dict]:
@@ -61,6 +66,7 @@ async def load_players(db: AsyncSession, room_id: UUID) -> list[dict]:
             "rating": user.rating,
             "is_ready": player.is_ready,
             "score": player.score,
+            "elo_change": player.elo_change,
         }
         for player, user in rows
     ]
@@ -81,13 +87,61 @@ async def room_view(db: AsyncSession, room: Room) -> dict:
         "problem_set_id": str(room.problem_set_id) if room.problem_set_id else None,
         "question_id": str(room.question_id) if room.question_id else None,
         "started_at": room.started_at.isoformat() if room.started_at else None,
-        # GAME_OVER có thể bị bỏ lỡ khi mất mạng. Hai trường từ DB này giúp client
-        # đọc lại người thắng/thời điểm kết thúc qua trạng thái phòng khi kết nối lại.
-        # Đây là dữ liệu khôi phục trạng thái, không tự phát lại sự kiện GAME_OVER.
         "winner_id": str(room.winner_id) if room.winner_id else None,
+        "is_draw": room.is_draw,
         "finished_at": room.finished_at.isoformat() if room.finished_at else None,
         "players": await load_players(db, room.id),
         "question": question,
+    }
+
+
+async def finished_event(db: AsyncSession, room: Room) -> dict | None:
+    """Dựng lại sự kiện kết quả (GAME_OVER / MATCH_DRAW) của phòng đã FINISHED, cùng định dạng
+    với lúc phát trực tiếp, để người vào lại phòng (hoặc tải lại trang) vẫn thấy màn hình tổng kết."""
+    if room.status != "FINISHED":
+        return None
+    players = await load_players(db, room.id)
+    finished_at = room.finished_at.isoformat() if room.finished_at else None
+    if room.is_draw:
+        return {
+            "event": "MATCH_DRAW",
+            "data": {
+                "message": "Hết giờ, trận đấu hòa",
+                "is_draw": True,
+                "finished_at": finished_at,
+                "players": [
+                    {
+                        "user_id": p["user_id"],
+                        "username": p["username"],
+                        "rating": p["rating"],
+                        "elo_change": p["elo_change"],
+                    }
+                    for p in players
+                ],
+            },
+        }
+    if room.winner_id is None:
+        return None  # phòng cũ không có winner_id: không dựng được kết quả
+    winner = next((p for p in players if p["user_id"] == str(room.winner_id)), None)
+    loser = next((p for p in players if p["user_id"] != str(room.winner_id)), None)
+    if winner is None or loser is None:
+        return None
+    completion_time = 0.0
+    if room.started_at and room.finished_at:
+        completion_time = max(0.0, (room.finished_at - room.started_at).total_seconds())
+    return {
+        "event": "GAME_OVER",
+        "data": {
+            "room_id": str(room.id),
+            "winner_id": winner["user_id"],
+            "winner_username": winner["username"],
+            "loser_id": loser["user_id"],
+            "winner_elo_change": winner["elo_change"],
+            "loser_elo_change": loser["elo_change"],
+            "elo_change": {winner["user_id"]: winner["elo_change"], loser["user_id"]: loser["elo_change"]},
+            "finished_at": finished_at,
+            "completion_time": completion_time,
+        },
     }
 
 
@@ -151,6 +205,7 @@ async def start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
                 "question": question_payload(question),
             },
         })
+        start_match_timer(room_code, room_id)
 
 
 async def try_auto_start(code: str, room: Room, db: AsyncSession) -> None:
@@ -220,18 +275,22 @@ async def join_room(
     ).scalars().first()
     if room is None:
         raise NotFoundException("Không tìm thấy phòng")
+    if room.status == "CANCELLED":
+        raise BadRequestException("Phòng đã bị hủy")
+    players = (
+        await db.execute(select(RoomPlayer).where(RoomPlayer.room_id == room.id))
+    ).scalars().all()
+    # Thành viên cũ vào lại: kiểm tra TRƯỚC trạng thái phòng, và trả status để client biết
+    # cần vào Arena (WAITING/PLAYING) hay xem kết quả (FINISHED).
+    if any(player.user_id == current_user.id for player in players):
+        return BaseResponse(
+            message="Bạn đã ở trong phòng này",
+            data={"room_id": str(room.id), "room_code": room.code, "status": room.status},
+        )
     if room.status != "WAITING":
         raise BadRequestException("Phòng đã đầy hoặc trận đấu đang diễn ra")
     if room.game_mode != "CUSTOM_1V1":
         raise BadRequestException("Không thể vào phòng này bằng mã phòng")
-    players = (
-        await db.execute(select(RoomPlayer).where(RoomPlayer.room_id == room.id))
-    ).scalars().all()
-    if any(player.user_id == current_user.id for player in players):
-        return BaseResponse(
-            message="Bạn đã ở trong phòng này",
-            data={"room_id": str(room.id), "room_code": room.code},
-        )
     await _reject_other_active_room(db, current_user.id, allowed_room_id=room.id)
     if len(players) >= 2:
         raise BadRequestException("Phòng đã đầy hoặc trận đấu đang diễn ra")
@@ -314,7 +373,11 @@ async def arena_websocket(
         "event": "ROOM_STATE",
         "data": await room_view(db, room),
     })
+    result_event = await finished_event(db, room)
+    if result_event is not None:
+        await manager.send_personal(code, user.id, result_event)
     await try_auto_start(code, room, db)
+    last_typing_at = float("-inf")
     try:
         while True:
             try:
@@ -327,9 +390,23 @@ async def arena_websocket(
                 continue
             if not isinstance(data, dict):
                 continue
+            action = data.get("action")
+            if action == "player_typing":
+                # AC 1: payload chỉ có action, không chứa code. Xử lý bằng RAM, không chạm DB
+                # vì tín hiệu này gửi rất dày. Chỉ có ý nghĩa khi trận đang diễn ra.
+                now = time.monotonic()
+                if manager.is_playing(code) and now - last_typing_at >= TYPING_THROTTLE_SECONDS:
+                    last_typing_at = now
+                    opponent_id = manager.opponent_id(code, user.id)
+                    if opponent_id is not None:
+                        # AC 1.3: gửi đích danh cho đối thủ
+                        await manager.send_personal(code, opponent_id, {
+                            "event": "OPPONENT_TYPING",
+                            "data": {"is_typing": True},
+                        })
+                continue
             await db.refresh(room)
             await db.refresh(room_player)
-            action = data.get("action")
             if action == "player_ready":
                 if room.status != "WAITING":
                     await manager.send_personal(code, user.id, {
@@ -348,17 +425,6 @@ async def arena_websocket(
                     cid = await manager.begin_countdown(code)
                     if cid is not None:
                         manager.track_task(asyncio.create_task(start_countdown(code, room.id, cid)))
-                continue
-            if action == "player_typing":
-                # AC 1.3: Lọc lấy UUID của đối thủ đang kết nối trong phòng
-                room_clients = manager.active_rooms.get(code, {})
-                for uid in room_clients.keys():
-                    if uid != user.id:
-                        # Gửi đích danh tin nhắn siêu nhẹ OPPONENT_TYPING tới đối thủ
-                        await manager.send_personal(code, uid, {
-                            "event": "OPPONENT_TYPING",
-                            "data": {"is_typing": bool(data.get("is_typing", True))}
-                        })
                 continue
             await manager.send_personal(code, user.id, {
                 "event": "ERROR",
