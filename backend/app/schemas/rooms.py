@@ -45,14 +45,6 @@ class WSPayload(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
-# --- Post-Match AI Review (FR-4.2) ---
-class AIReviewReport(BaseModel):
-    time_complexity_analysis: str
-    space_complexity_analysis: str
-    clean_code_evaluation: str
-    optimized_solution: dict[str, str]  # Code mẫu chuẩn cho từng ngôn ngữ
-
-
 class RoomResponse(BaseModel):
     id: UUID
     code: str = Field(..., min_length=6, max_length=10,
@@ -64,7 +56,6 @@ class RoomResponse(BaseModel):
     status: RoomStatus
     is_draw: bool = False
     rating_applied: bool = False
-    ai_review: AIReviewReport | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None

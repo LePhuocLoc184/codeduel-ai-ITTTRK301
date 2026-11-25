@@ -41,13 +41,6 @@ class QuestionBase(BaseModel):
     generated_by_ai: bool = False
 
 
-# --- FR-4.1: Input cho AI Problem Generator ---
-class AIQuestionGenerateRequest(BaseModel):
-    difficulty: QuestionDifficulty
-    topic: str = Field(min_length=2, max_length=50,
-                       examples=["Array, String, Dynamic Programming"])
-
-
 class QuestionResponse(QuestionBase):
     id: UUID
     problem_set_id: UUID

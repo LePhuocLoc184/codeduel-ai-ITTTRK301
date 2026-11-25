@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
     CORS_ORIGIN_REGEX: str = r"^https?://(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(:\d+)?$"
 
+    AI_PROVIDER: str = "openai"
+    AI_API_KEY: str = ""
+    AI_MODEL: str = "gpt-4o-mini"
+    AI_BASE_URL: str = "https://api.openai.com/v1"
+    AI_QUESTION_TIMEOUT_SECONDS: float = Field(default=25.0, gt=0, le=60)
+
     # trả về Array list các cors đã thiết lập
 
     @property

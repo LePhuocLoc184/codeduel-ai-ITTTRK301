@@ -229,7 +229,7 @@ export default function Matchmaking() {
   return <section className="mm-page">
     <div className="eyebrow"><span className="eyebrow-line" /> RANKED MATCH</div>
     <h1>{found ? <>Đã tìm thấy <span>đối thủ!</span></> : <>Đang tìm <span>đối thủ…</span></>}</h1>
-    <p className="mm-sub" role="status" aria-live="polite">{found ? `Trận đấu bắt đầu sau ${Math.max(countdown, 0)} giây. Hãy chuẩn bị tinh thần!` : "Hệ thống đang ghép bạn với người chơi có trình độ tương đương."}</p>
+    <p className="mm-sub" role="status" aria-live="polite">{found ? `Chuyển vào phòng sau ${Math.max(countdown, 0)} giây. Khi cả hai cùng nhấn “Sẵn sàng”, AI sẽ tạo đề thi.` : "Hệ thống đang ghép bạn với người chơi có trình độ tương đương."}</p>
 
     <div className="mm-versus">
       <PlayerCard name={user.username} rating={myRating === undefined ? null : (myRating ?? user.rating)} avatarUrl={user.avatar_url} tag="BẠN" found={found} />
