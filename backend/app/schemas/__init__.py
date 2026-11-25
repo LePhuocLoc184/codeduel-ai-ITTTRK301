@@ -14,7 +14,6 @@ from app.schemas.questions import (
     TestCaseItem,
     StarterCodeSchema,
     QuestionBase,
-    AIQuestionGenerateRequest,
     QuestionResponse,
 )
 from app.schemas.rooms import (
@@ -24,7 +23,6 @@ from app.schemas.rooms import (
     JoinRoomRequest,
     WSEventType,
     WSPayload,
-    AIReviewReport,
     RoomResponse,
 )
 from app.schemas.submissions import (
