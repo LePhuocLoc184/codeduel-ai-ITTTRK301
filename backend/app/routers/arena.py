@@ -17,6 +17,7 @@ from app.services.match_timer import start_match_timer
 from app.services.question_service import ensure_fallback_question, pick_question
 from app.services.ai_question_service import generate_and_save_match_question
 from app.utils.starter_code import BASIC_STARTER_CODE
+from app.services.execute import surrender_match
 from app.services.room_service import generate_unique_room_code, get_active_room
 
 router = APIRouter(prefix="/api/v1/rooms", tags=["Rooms"])
@@ -367,6 +368,16 @@ async def get_room(
     if member is None:
         raise NotFoundException("Không tìm thấy phòng")
     return BaseResponse(data=await room_view(db, room))
+
+
+@router.post("/{room_code}/surrender", response_model=BaseResponse[dict])
+async def surrender_room(
+    room_code: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Đầu hàng khi trận đang PLAYING: đối thủ thắng, phát GAME_OVER, không rời màn hình phòng."""
+    event = await surrender_match(room_code, current_user.id)
+    return BaseResponse(message="Đã đầu hàng", data=event)
 
 
 @router.websocket("/ws/arena/{room_code}")

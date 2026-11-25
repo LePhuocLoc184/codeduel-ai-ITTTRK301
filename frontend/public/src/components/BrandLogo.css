@@ -1,0 +1,29 @@
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.brand-logo-icon {
+  display: block;
+  flex: none;
+}
+
+.brand-logo-wordmark {
+  color: #f1f2f4;
+  font-family: var(--display);
+  font-size: inherit;
+  font-weight: 700;
+  letter-spacing: -.7px;
+}
+
+.brand-logo-wordmark > span { color: var(--green); }
+.brand-logo-wordmark small { margin-left: 3px; color: #8d98a5; font: 500 9px var(--mono); letter-spacing: 0; }
+
+.welcome-mark {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}

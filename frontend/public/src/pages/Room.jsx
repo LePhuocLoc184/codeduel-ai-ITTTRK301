@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft,
@@ -7,10 +7,13 @@ import {
   Check,
   Clock,
   Copy,
+  Flag,
+  GripHorizontal,
   Loader2,
   Play,
   RotateCcw,
   Send,
+  Share2,
   X,
   Swords,
   Trophy,
@@ -19,6 +22,7 @@ import {
 import Editor from "@monaco-editor/react"
 import api, { getToken, getApiErrorMessage } from "../api/axios"
 import { useAuth } from "../context/AuthContext"
+import BrandLogo from "../components/BrandLogo"
 import ProblemPanel from "../components/arena/ProblemPanel"
 import ConsolePanel from "../components/arena/ConsolePanel"
 import ArenaSidebar from "../components/arena/ArenaSidebar"
@@ -89,6 +93,43 @@ const languageNames = {
   java: "Java",
 }
 
+const pad = (value) => String(value).padStart(2, "0")
+
+// Combat Top Bar Timer: tính thời gian còn lại + % thanh tiến độ thời gian (15 phút)
+function CombatTopBarTimer({ deadline }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!deadline) return undefined
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [deadline])
+
+  if (!deadline) return <div className="combat-timer-badge"><Clock size={15} /><span>--:--</span></div>
+
+  const left = Math.max(0, Math.ceil((deadline - now) / 1000))
+  const urgent = left <= 60
+  const percent = Math.min(100, Math.max(0, (left / (15 * 60)) * 100))
+
+  return (
+    <div className={`combat-timer-badge${urgent ? " timer-urgent" : ""}`} title={`Thời gian thi đấu: còn ${left}s`}>
+      <div className="combat-timer-header">
+        <Clock size={14} className={urgent ? "timer-icon-urgent" : ""} />
+        <span className="combat-timer-digits">
+          {pad(Math.floor(left / 60))}:{pad(left % 60)}
+        </span>
+      </div>
+      <div className="combat-timer-track" role="progressbar" aria-valuenow={left} aria-valuemax={900}>
+        <div
+          className={`combat-timer-bar${urgent ? " bar-urgent" : ""}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 // Pháo giấy cho người thắng: vị trí, độ trễ, màu và độ dài rơi được tính cố định từ chỉ số
 // (không dùng Math.random trong render để hiệu ứng không đổi mỗi lần component render lại).
 const CONFETTI_COUNT = 42
@@ -135,11 +176,16 @@ function MatchResult({ result, players, userId }) {
       ? "Bạn đã chiến thắng!"
       : "Bạn đã thua trận này"
 
+  const surrendered = result.reason === "surrender"
   const subtitle = result.is_draw
     ? "Hết giờ mà chưa ai vượt qua tất cả testcase."
-    : won
-      ? "Bạn là người đầu tiên vượt qua tất cả testcase."
-      : `${winnerName} đã vượt qua tất cả testcase trước bạn.`
+    : surrendered
+      ? won
+        ? "Đối thủ đã đầu hàng. Bạn thắng trận này."
+        : "Bạn đã đầu hàng. Trận đấu kết thúc và bạn bị tính thua."
+      : won
+        ? "Bạn là người đầu tiên vượt qua tất cả testcase."
+        : `${winnerName} đã vượt qua tất cả testcase trước bạn.`
 
   const seconds = Number(result.completion_time)
 
@@ -258,6 +304,8 @@ export default function Room() {
   const [codes, setCodes] = useState({ cpp: "", python: "", java: "" })
   const loadedQuestionRef = useRef(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [showSurrenderConfirm, setShowSurrenderConfirm] = useState(false)
+  const [surrendering, setSurrendering] = useState(false)
   // Đã quá hạn của trận (đồng hồ về 0) và server có chốt kịp hay không.
   const [timeUp, setTimeUp] = useState(false)
   const [timeUpStalled, setTimeUpStalled] = useState(false)
@@ -277,6 +325,36 @@ export default function Room() {
   const [submitLockedUntil, setSubmitLockedUntil] = useState(0)
   const [cooldownLeft, setCooldownLeft] = useState(0)
 
+  // Chiều cao thanh Console khi resize kéo thả (mặc định 200px)
+  const [consoleHeight, setConsoleHeight] = useState(200)
+  const isDraggingSplitterRef = useRef(false)
+  const startDragYRef = useRef(0)
+  const startHeightRef = useRef(200)
+
+  const handleSplitterMouseDown = useCallback((e) => {
+    e.preventDefault()
+    isDraggingSplitterRef.current = true
+    startDragYRef.current = e.clientY
+    startHeightRef.current = consoleHeight
+
+    const onMouseMove = (moveEvent) => {
+      if (!isDraggingSplitterRef.current) return
+      const deltaY = moveEvent.clientY - startDragYRef.current
+      // Kéo chuột xuống => Console nhỏ lại, kéo lên => Console to lên
+      const newHeight = Math.max(80, Math.min(500, startHeightRef.current - deltaY))
+      setConsoleHeight(newHeight)
+    }
+
+    const onMouseUp = () => {
+      isDraggingSplitterRef.current = false
+      window.removeEventListener("mousemove", onMouseMove)
+      window.removeEventListener("mouseup", onMouseUp)
+    }
+
+    window.addEventListener("mousemove", onMouseMove)
+    window.addEventListener("mouseup", onMouseUp)
+  }, [consoleHeight])
+
   const eventIdRef = useRef(0)
   const roomStatusRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -291,6 +369,7 @@ export default function Room() {
   const userId = user?.id
   // true khi chính người chơi chủ động đóng socket (Hủy đấu) -> không tự kết nối lại.
   const manualCloseRef = useRef(false)
+  const gameOverAppliedRef = useRef(false)
 
   useEffect(() => {
     if (!submitLockedUntil) return undefined
@@ -315,6 +394,61 @@ export default function Room() {
     const entry = { id: eventIdRef.current, at: Date.now(), text, tone }
     setEvents((current) => [entry, ...current].slice(0, MAX_EVENTS))
   }
+
+  const applyGameOver = (data = {}) => {
+    if (gameOverAppliedRef.current) {
+      if (data.reason) {
+        setResult((current) =>
+          current ? { ...current, reason: data.reason, surrendered_by: data.surrendered_by } : current,
+        )
+      }
+      setShowSurrenderConfirm(false)
+      setSurrendering(false)
+      return
+    }
+    gameOverAppliedRef.current = true
+    const surrendered = data.reason === "surrender"
+    setResult({
+      is_draw: false,
+      winner_id: data.winner_id,
+      winner_username: data.winner_username,
+      elo_change: data.elo_change || {},
+      completion_time: data.completion_time,
+      reason: data.reason,
+      surrendered_by: data.surrendered_by,
+    })
+    setOpponentTyping(false)
+    setShowSurrenderConfirm(false)
+    setSurrendering(false)
+    setRoom((current) =>
+      current
+        ? {
+            ...current,
+            status: "FINISHED",
+            winner_id: data.winner_id,
+            finished_at: data.finished_at,
+          }
+        : current,
+    )
+    if (surrendered) {
+      pushEvent(
+        data.winner_id === userId
+          ? "Đối thủ đã đầu hàng. Bạn thắng trận này!"
+          : "Bạn đã đầu hàng.",
+        data.winner_id === userId ? "success" : "warn",
+      )
+    } else {
+      pushEvent(
+        data.winner_id === userId
+          ? "Bạn đã vượt qua tất cả testcase và giành chiến thắng!"
+          : `${data.winner_username || "Đối thủ"} đã hoàn thành bài trước.`,
+        data.winner_id === userId ? "success" : "warn",
+      )
+    }
+  }
+
+  const applyGameOverRef = useRef(applyGameOver)
+  applyGameOverRef.current = applyGameOver
 
   const notifyRoomEvent = (text, tone = "info", busy = false, title = "") => {
     window.clearTimeout(roomNoticeTimerRef.current)
@@ -353,7 +487,7 @@ export default function Room() {
       setOpponentTyping(false)
       setRoom(fresh)
 
-      if (fresh.status === "FINISHED") {
+      if (fresh.status === "FINISHED" && !gameOverAppliedRef.current) {
         pushEvent(
           !fresh.winner_id
             ? "Hết giờ, trận đấu hòa."
@@ -403,6 +537,7 @@ export default function Room() {
   useEffect(() => {
     if (loading || !userId) return undefined
 
+    gameOverAppliedRef.current = false
     let active = true
     let reconnectTimer = null
     let attempts = 0
@@ -619,32 +754,7 @@ export default function Room() {
               }
 
               if (message.event === "GAME_OVER") {
-                const data = message.data || {}
-
-                setResult({
-                  is_draw: false,
-                  winner_id: data.winner_id,
-                  winner_username: data.winner_username,
-                  elo_change: data.elo_change || {},
-                  completion_time: data.completion_time,
-                })
-                setOpponentTyping(false)
-                setRoom((current) =>
-                  current
-                    ? {
-                        ...current,
-                        status: "FINISHED",
-                        winner_id: data.winner_id,
-                        finished_at: data.finished_at,
-                      }
-                    : current,
-                )
-                pushEvent(
-                  data.winner_id === userId
-                    ? "Bạn đã vượt qua tất cả testcase và giành chiến thắng!"
-                    : `${data.winner_username || "Đối thủ"} đã hoàn thành bài trước.`,
-                  data.winner_id === userId ? "success" : "warn",
-                )
+                applyGameOverRef.current(message.data || {})
               }
 
               if (message.event === "MATCH_DRAW") {
@@ -768,7 +878,20 @@ export default function Room() {
 
   useEffect(() => {
     roomStatusRef.current = room?.status ?? null
-  }, [room?.status])
+    if (room?.status === "PLAYING" || room?.status === "WAITING") {
+      try {
+        localStorage.setItem("codeduel_active_room", JSON.stringify({
+          room_code: roomCode,
+          status: room.status,
+          updated_at: Date.now(),
+        }))
+      } catch {}
+    } else if (room?.status === "FINISHED" || room?.status === "CANCELLED") {
+      try {
+        localStorage.removeItem("codeduel_active_room")
+      } catch {}
+    }
+  }, [room?.status, roomCode])
 
   // Dọn timer chỉ báo gõ khi rời trang.
   useEffect(
@@ -1056,6 +1179,31 @@ export default function Room() {
     }
 
     navigate("/arena")
+  }
+
+  const leavePlayingRoom = () => {
+    try {
+      manualCloseRef.current = true
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.close()
+      }
+    } catch {
+      // Đóng socket thất bại vẫn thoát giao diện; trận PLAYING không bị kết thúc.
+    }
+    navigate("/arena")
+  }
+
+  const confirmSurrender = async () => {
+    if (surrendering) return
+    setSurrendering(true)
+    setError("")
+    try {
+      const { data } = await api.post(`/api/v1/rooms/${encodeURIComponent(roomCode)}/surrender`)
+      applyGameOver(data?.data || {})
+    } catch (err) {
+      setSurrendering(false)
+      setError(getApiErrorMessage(err, "Không thể đầu hàng. Hãy thử lại."))
+    }
   }
 
   const copyCode = async () => {
@@ -1396,241 +1544,354 @@ export default function Room() {
           )}
 
           {isPlaying && (
-            <div className="arena-grid">
-              <aside className="arena-col arena-col-left">
-                <ProblemPanel question={question} />
-              </aside>
-
-              <div className="arena-col arena-col-center">
-                <div className="code-editor-panel">
-                  <div className="code-editor-header">
-                    <div className="code-editor-title">
-                      <span className="feature-index">
-                        {question.difficulty ||
-                          "THỬ THÁCH"}
-                      </span>
-
-                      <span className="code-editor-question">
-                        {question.title}
-                      </span>
-                    </div>
-
-                    <div className="code-editor-settings">
-                      <select
-                        value={language}
-                        onChange={(event) =>
-                          changeLanguage(
-                            event.target.value,
-                          )
-                        }
-                      >
-                        <option value="cpp">
-                          C++
-                        </option>
-
-                        <option value="python">
-                          Python
-                        </option>
-
-                        <option value="java">
-                          Java
-                        </option>
-                      </select>
-
-                      <select
-                        value={theme}
-                        onChange={(event) =>
-                          setTheme(
-                            event.target.value,
-                          )
-                        }
-                      >
-                        <option value="vs-dark">
-                          Dark
-                        </option>
-
-                        <option value="light">
-                          Light
-                        </option>
-                      </select>
-
-                      <button
-                        type="button"
-                        className="editor-reset-button"
-                        onClick={() =>
-                          setShowResetConfirm(
-                            true,
-                          )
-                        }
-                        disabled={timeIsUp}
-                      >
-                        <RotateCcw size={14} />
-                        Reset Code
-                      </button>
-
-                      <button
-                        type="button"
-                        className="editor-reset-button"
-                        onClick={() => judgeCode("run")}
-                        disabled={Boolean(judge.busy) || timeIsUp}
-                      >
-                        <Play size={14} />
-                        {judge.busy === "run" ? "Đang chạy..." : "Chạy thử"}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="editor-submit-button"
-                        onClick={() => judgeCode("submit")}
-                        disabled={Boolean(judge.busy) || cooldownLeft > 0 || timeIsUp}
-                      >
-                        <Send size={14} />
-                        {judge.busy === "submit"
-                          ? "Đang chấm..."
-                          : cooldownLeft > 0
-                            ? `Nộp lại sau ${cooldownLeft}s`
-                            : "Nộp bài"}
-                      </button>
-                    </div>
+            <>
+              {/* Combat Zen Mode: Top Bar 44px tối giản & giàu thông tin trận đấu */}
+              <header className="combat-topbar">
+                <div className="combat-topbar-brand">
+                  <Link to="/home" className="combat-brand-link" title="Về trang chủ">
+                    <BrandLogo size={28} iconOnly />
+                    <span className="combat-brand-name">code<b>duel</b></span>
+                  </Link>
+                  <div className="combat-room-tag">
+                    <span>ROOM #{roomCode}</span>
+                    <button
+                      type="button"
+                      className="combat-copy-link-btn"
+                      onClick={copyCode}
+                      title="Sao chép link mời bạn bè"
+                    >
+                      {copied ? <Check size={13} /> : <Share2 size={13} />}
+                      {copied ? "Đã copy link" : "Mời bạn"}
+                    </button>
                   </div>
-
-                  <div className="editor-toolbar">
-                    <span>
-                      {languageNames[
-                        language
-                      ]}
-                    </span>
-
-                    <span>
-                      Ctrl+/ comment
-                    </span>
-
-                    <span>
-                      Tab = 4 spaces
-                    </span>
-
-                    <span>
-                      Ctrl+F tìm kiếm
-                    </span>
-                  </div>
-
-                  <div className="monaco-wrapper">
-                    <Editor
-                      height="100%"
-                      path={`${question.id}-${language}`}
-                      language={
-                        languageMap[
-                          language
-                        ]
-                      }
-                      theme={theme}
-                      value={code}
-                      onChange={
-                        handleEditorChange
-                      }
-                      onMount={
-                        handleEditorMount
-                      }
-                      options={timeIsUp ? EDITOR_OPTIONS_LOCKED : EDITOR_OPTIONS}
-                    />
-                  </div>
-
-                  {timeIsUp && (
-                    <div className="reset-confirm-overlay" role="alertdialog" aria-live="assertive">
-                      <div className="reset-confirm time-up-card">
-                        <h3>
-                          <Clock size={18} /> Đã hết giờ
-                        </h3>
-
-                        {!timeUpStalled ? (
-                          <p className="time-up-wait">
-                            <Loader2 size={15} className="console-spin" />
-                            Đang chờ máy chủ chốt kết quả trận…
-                          </p>
-                        ) : (
-                          <p>
-                            Máy chủ chưa chốt kết quả của trận này nên phòng vẫn bị giữ ở trạng thái đang
-                            diễn ra. Bạn không thể làm bài thêm, và chưa tạo được phòng mới hay tìm trận
-                            cho đến khi máy chủ chốt trận hoặc phòng được dọn dẹp.
-                          </p>
-                        )}
-
-                        <div className="reset-confirm-actions">
-                          <button
-                            type="button"
-                            className="button button-ghost"
-                            onClick={() => resyncRef.current()}
-                          >
-                            Kiểm tra lại
-                          </button>
-
-                          <button
-                            type="button"
-                            className="button"
-                            onClick={() => navigate("/arena")}
-                          >
-                            Về đấu trường
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {showResetConfirm && (
-                    <div className="reset-confirm-overlay">
-                      <div className="reset-confirm">
-                        <h3>
-                          Reset Code?
-                        </h3>
-
-                        <p>
-                          Toàn bộ code hiện tại
-                          sẽ được thay bằng
-                          starter code ban đầu.
-                        </p>
-
-                        <div className="reset-confirm-actions">
-                          <button
-                            type="button"
-                            className="button-ghost"
-                            onClick={() =>
-                              setShowResetConfirm(
-                                false,
-                              )
-                            }
-                          >
-                            Hủy
-                          </button>
-
-                          <button
-                            type="button"
-                            className="button"
-                            onClick={
-                              resetCode
-                            }
-                          >
-                            Reset Code
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
-                <ConsolePanel busy={judge.busy} output={judge.output} />
-              </div>
+                <div className="combat-topbar-center">
+                  <CombatTopBarTimer deadline={matchDeadline} />
+                </div>
 
-              <aside className="arena-col arena-col-right">
-                <ArenaSidebar
-                  opponent={opponent}
-                  opponentProgress={opponent ? progress[opponent.user_id] : null}
-                  deadline={matchDeadline}
-                  opponentTyping={opponentTyping}
-                  connection={connection}
-                  events={events}
-                />
-              </aside>
-            </div>
+                <div className="combat-topbar-actions">
+                  <div className="combat-scoreboard-summary">
+                    <span className="combat-score-you">
+                      Bạn: <b>{progress[userId]?.passed ?? (judge.output?.kind === "submit" ? (judge.output.data?.passed_test_cases ?? 0) : 0)}</b>/{room.question?.total_test_cases ?? (progress[userId]?.total ?? 0)}
+                    </span>
+                    <span className="combat-score-vs">VS</span>
+                    <span className="combat-score-opp">
+                      {opponent?.username || "Đối thủ"}: <b>{opponent ? (progress[opponent.user_id]?.passed ?? 0) : 0}</b>/{room.question?.total_test_cases ?? (opponent ? (progress[opponent.user_id]?.total ?? 0) : 0)}
+                    </span>
+                  </div>
+
+                  <div className="combat-action-group">
+                    <button
+                      type="button"
+                      className="combat-leave-btn"
+                      onClick={leavePlayingRoom}
+                      title="Thoát về sảnh đấu trường — trận vẫn tiếp tục"
+                    >
+                      <ArrowLeft size={14} /> Rời phòng
+                    </button>
+                    <button
+                      type="button"
+                      className="combat-surrender-btn"
+                      onClick={() => setShowSurrenderConfirm(true)}
+                      title="Nhận thua ngay lập tức và kết thúc trận"
+                    >
+                      <Flag size={14} /> Đầu hàng
+                    </button>
+                  </div>
+                </div>
+              </header>
+
+              {showSurrenderConfirm && (
+                <div
+                  className="surrender-confirm-overlay"
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="surrender-confirm-title"
+                  aria-describedby="surrender-confirm-desc"
+                >
+                  <div className="surrender-confirm">
+                    <h3 id="surrender-confirm-title">
+                      <Flag size={18} /> Xác nhận đầu hàng
+                    </h3>
+                    <p id="surrender-confirm-desc">
+                      Bạn có chắc chắn muốn đầu hàng? Trận đấu sẽ kết thúc ngay lập tức
+                      và bạn sẽ bị tính thua (trừ điểm ELO nếu là đấu hạng).
+                    </p>
+                    <div className="surrender-confirm-actions">
+                      <button
+                        type="button"
+                        className="button-ghost"
+                        disabled={surrendering}
+                        onClick={() => setShowSurrenderConfirm(false)}
+                      >
+                        Hủy (Tiếp tục đấu)
+                      </button>
+                      <button
+                        type="button"
+                        className="surrender-confirm-submit"
+                        disabled={surrendering}
+                        onClick={confirmSurrender}
+                      >
+                        {surrendering ? "Đang đầu hàng..." : "Xác nhận đầu hàng"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="arena-grid">
+                <aside className="arena-col arena-col-left">
+                  <ProblemPanel question={question} />
+                </aside>
+
+                <div className="arena-col arena-col-center">
+                  <div className="code-editor-panel" style={{ flex: 1 }}>
+                    <div className="code-editor-header">
+                      <div className="code-editor-title">
+                        <span className="feature-index">
+                          {question.difficulty ||
+                            "THỬ THÁCH"}
+                        </span>
+
+                        <span className="code-editor-question">
+                          {question.title}
+                        </span>
+                      </div>
+
+                      <div className="code-editor-settings">
+                        <select
+                          value={language}
+                          onChange={(event) =>
+                            changeLanguage(
+                              event.target.value,
+                            )
+                          }
+                        >
+                          <option value="cpp">
+                            C++
+                          </option>
+
+                          <option value="python">
+                            Python
+                          </option>
+
+                          <option value="java">
+                            Java
+                          </option>
+                        </select>
+
+                        <select
+                          value={theme}
+                          onChange={(event) =>
+                            setTheme(
+                              event.target.value,
+                            )
+                          }
+                        >
+                          <option value="vs-dark">
+                            Dark
+                          </option>
+
+                          <option value="light">
+                            Light
+                          </option>
+                        </select>
+
+                        <button
+                          type="button"
+                          className="editor-reset-button"
+                          onClick={() =>
+                            setShowResetConfirm(
+                              true,
+                            )
+                          }
+                          disabled={timeIsUp}
+                        >
+                          <RotateCcw size={14} />
+                          Reset Code
+                        </button>
+
+                        <button
+                          type="button"
+                          className="editor-reset-button"
+                          onClick={() => judgeCode("run")}
+                          disabled={Boolean(judge.busy) || timeIsUp}
+                        >
+                          <Play size={14} />
+                          {judge.busy === "run" ? "Đang chạy..." : "Chạy thử"}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="editor-submit-button"
+                          onClick={() => judgeCode("submit")}
+                          disabled={Boolean(judge.busy) || cooldownLeft > 0 || timeIsUp}
+                        >
+                          <Send size={14} />
+                          {judge.busy === "submit"
+                            ? "Đang chấm..."
+                            : cooldownLeft > 0
+                              ? `Nộp lại sau ${cooldownLeft}s`
+                              : "Nộp bài"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="editor-toolbar">
+                      <span>
+                        {languageNames[
+                          language
+                        ]}
+                      </span>
+
+                      <span>
+                        Ctrl+/ comment
+                      </span>
+
+                      <span>
+                        Tab = 4 spaces
+                      </span>
+
+                      <span>
+                        Ctrl+F tìm kiếm
+                      </span>
+                    </div>
+
+                    <div className="monaco-wrapper">
+                      <Editor
+                        height="100%"
+                        path={`${question.id}-${language}`}
+                        language={
+                          languageMap[
+                            language
+                          ]
+                        }
+                        theme={theme}
+                        value={code}
+                        onChange={
+                          handleEditorChange
+                        }
+                        onMount={
+                          handleEditorMount
+                        }
+                        options={timeIsUp ? EDITOR_OPTIONS_LOCKED : EDITOR_OPTIONS}
+                      />
+                    </div>
+
+                    {timeIsUp && (
+                      <div className="reset-confirm-overlay" role="alertdialog" aria-live="assertive">
+                        <div className="reset-confirm time-up-card">
+                          <h3>
+                            <Clock size={18} /> Đã hết giờ
+                          </h3>
+
+                          {!timeUpStalled ? (
+                            <p className="time-up-wait">
+                              <Loader2 size={15} className="console-spin" />
+                              Đang chờ máy chủ chốt kết quả trận…
+                            </p>
+                          ) : (
+                            <p>
+                              Máy chủ chưa chốt kết quả của trận này nên phòng vẫn bị giữ ở trạng thái đang
+                              diễn ra. Bạn không thể làm bài thêm, và chưa tạo được phòng mới hay tìm trận
+                              cho đến khi máy chủ chốt trận hoặc phòng được dọn dẹp.
+                            </p>
+                          )}
+
+                          <div className="reset-confirm-actions">
+                            <button
+                              type="button"
+                              className="button button-ghost"
+                              onClick={() => resyncRef.current()}
+                            >
+                              Kiểm tra lại
+                            </button>
+
+                            <button
+                              type="button"
+                              className="button"
+                              onClick={() => navigate("/arena")}
+                            >
+                              Về đấu trường
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {showResetConfirm && (
+                      <div className="reset-confirm-overlay">
+                        <div className="reset-confirm">
+                          <h3>
+                            Reset Code?
+                          </h3>
+
+                          <p>
+                            Toàn bộ code hiện tại
+                            sẽ được thay bằng
+                            starter code ban đầu.
+                          </p>
+
+                          <div className="reset-confirm-actions">
+                            <button
+                              type="button"
+                              className="button-ghost"
+                              onClick={() =>
+                                setShowResetConfirm(
+                                  false,
+                                )
+                              }
+                            >
+                              Hủy
+                            </button>
+
+                            <button
+                              type="button"
+                              className="button"
+                              onClick={
+                                resetCode
+                              }
+                            >
+                              Reset Code
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Thanh kéo thả thay đổi kích thước Splitter giữa Editor & Console */}
+                  <div
+                    className="arena-splitter"
+                    onMouseDown={handleSplitterMouseDown}
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Kéo để chỉnh độ cao Console"
+                    tabIndex={0}
+                  >
+                    <div className="splitter-handle">
+                      <GripHorizontal size={14} />
+                    </div>
+                  </div>
+
+                  <div style={{ height: `${consoleHeight}px`, flex: `0 0 ${consoleHeight}px` }}>
+                    <ConsolePanel busy={judge.busy} output={judge.output} />
+                  </div>
+                </div>
+
+                <aside className="arena-col arena-col-right">
+                  <ArenaSidebar
+                    opponent={opponent}
+                    opponentProgress={opponent ? progress[opponent.user_id] : null}
+                    deadline={matchDeadline}
+                    opponentTyping={opponentTyping}
+                    connection={connection}
+                    events={events}
+                  />
+                </aside>
+              </div>
+            </>
           )}
         </>
       )}

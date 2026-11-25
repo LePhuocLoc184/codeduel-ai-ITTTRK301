@@ -9,8 +9,9 @@ export default function MainLayout() {
   // Dùng thêm `key` (đổi sau mỗi lần bấm link, kể cả khi URL giữ nguyên) để bấm lại
   // "Tính năng" / "Bảng xếp hạng" / "Trang chủ" vẫn cuộn được dù người dùng đã tự cuộn đi chỗ khác.
   useEffect(() => {
-    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ behavior: "smooth" })
-    else window.scrollTo(0, 0)
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView({ behavior })
+    else window.scrollTo({ top: 0, behavior })
   }, [pathname, hash, key])
   return <div className="app-shell"><Navbar /><main className="page-main"><Outlet /></main><Footer /></div>
 }

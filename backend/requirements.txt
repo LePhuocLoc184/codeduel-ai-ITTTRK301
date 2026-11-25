@@ -33,6 +33,6 @@ typing-inspection==0.4.4
 typing_extensions==4.16.0
 uvicorn==0.54.0
 httpx==0.28.1
-# Judge dùng psutil lấy mẫu RAM RSS và theo dõi/dừng các tiến trình con đã phát hiện.
-# Đây là công cụ đo tài nguyên, không cung cấp sandbox bảo mật cho mã nguồn.
+# Judge dĂ¹ng psutil láº¥y máº«u RAM RSS vĂ  theo dĂµi/dá»«ng cĂ¡c tiáº¿n trĂ¬nh con Ä‘Ă£ phĂ¡t hiá»‡n.
+# ÄĂ¢y lĂ  cĂ´ng cá»¥ Ä‘o tĂ i nguyĂªn, khĂ´ng cung cáº¥p sandbox báº£o máº­t cho mĂ£ nguá»“n.
 psutil==7.2.2

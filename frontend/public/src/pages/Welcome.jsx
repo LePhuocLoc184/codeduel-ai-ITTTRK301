@@ -1,11 +1,12 @@
 import { Link } from "react-router-dom"
-import { ArrowRight, Braces, Code2, Terminal } from "lucide-react"
+import { ArrowRight, Braces, Terminal } from "lucide-react"
+import BrandLogo from "../components/BrandLogo"
 
 export default function Welcome() {
   return <section className="welcome-page">
     <div className="welcome-orbit orbit-one"/><div className="welcome-orbit orbit-two"/>
     <div className="welcome-content">
-      <div className="welcome-mark"><Code2 size={28}/></div>
+      <div className="welcome-mark"><BrandLogo size={34} iconOnly /></div>
       <div className="eyebrow"><span className="eyebrow-line"/> YOUR NEXT CHALLENGE STARTS HERE</div>
       <h1>Chào mừng đến<br/>với <span>CodeDuel.</span></h1>
       <p>Nơi những ý tưởng được viết thành code, kỹ năng được thử thách và mỗi trận đấu đưa bạn tiến xa hơn.</p>
