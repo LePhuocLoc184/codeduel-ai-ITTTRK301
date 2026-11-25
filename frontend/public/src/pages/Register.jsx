@@ -1,8 +1,9 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { ArrowLeft, ArrowRight, Code2, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react"
+import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, UserRound } from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { getApiErrorMessage } from "../api/axios"
+import BrandLogo from "../components/BrandLogo"
 
 export default function Register() {
   const { register } = useAuth()
@@ -34,7 +35,7 @@ export default function Register() {
   return <section className="auth-page">
     <Link to="/home" className="back-link"><ArrowLeft size={15}/> Về trang chủ</Link>
     <div className="auth-card">
-      <Link className="brand auth-brand" to="/home"><span className="brand-mark"><Code2 size={20}/></span><span>code<span className="brand-accent">duel</span><small>.dev</small></span></Link>
+      <Link className="brand auth-brand" to="/home"><BrandLogo size={32} /></Link>
       <div className="eyebrow"><span className="eyebrow-line"/> JOIN THE ARENA</div>
       <h1>Bắt đầu hành trình.</h1>
       <p className="auth-sub">Tạo tài khoản miễn phí và bước vào đấu trường.</p>

@@ -162,6 +162,42 @@ async def _finish_game(db, room: Room, winner_id: UUID) -> dict:
     }
 
 
+async def surrender_match(room_code: str, user_id: UUID) -> dict:
+    """Người chơi nhận thua khi trận đang PLAYING: đối thủ thắng, chốt GAME_OVER.
+
+    Tái sử dụng _finish_game (Elo, winner_id, FINISHED) — không invent luồng kết thúc khác.
+    """
+    code = room_code.strip().upper()
+    event = None
+    out_code = code
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            room = await db.scalar(
+                select(Room)
+                .where(Room.code == code)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if room is None:
+                raise NotFoundException("Không tìm thấy phòng đấu")
+            if room.status != "PLAYING" or room.rating_applied:
+                raise BadRequestException("Phòng chưa bắt đầu hoặc trận đấu đã kết thúc")
+            member = await db.scalar(select(RoomPlayer.id).where(
+                RoomPlayer.room_id == room.id, RoomPlayer.user_id == user_id))
+            if member is None:
+                raise ForbiddenException("Bạn không tham gia phòng đấu này")
+            opponent_id = await db.scalar(select(RoomPlayer.user_id).where(
+                RoomPlayer.room_id == room.id, RoomPlayer.user_id != user_id))
+            if opponent_id is None:
+                raise BadRequestException("Trận đấu cần đúng hai người chơi")
+            event = await _finish_game(db, room, opponent_id)
+            event["reason"] = "surrender"
+            event["surrendered_by"] = str(user_id)
+            out_code = room.code
+    await _broadcast_game_over(out_code, event)
+    return event
+
+
 async def _broadcast_game_over(room_code: str, event: dict) -> None:
     """Đồng bộ trạng thái Socket trong tiến trình hiện tại rồi gửi kết quả trận."""
     # Phát ngay sau commit; kết nối chậm không giữ HTTP request vô hạn.
