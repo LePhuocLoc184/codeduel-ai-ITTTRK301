@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from uuid import UUID
@@ -13,10 +14,13 @@ from app.models import ProblemSet, Question, Room, RoomPlayer, User
 from app.schemas.response import BaseResponse
 from app.schemas.rooms import CustomRoomCreateRequest, JoinRoomRequest
 from app.services.match_timer import start_match_timer
-from app.services.question_service import pick_question
+from app.services.question_service import ensure_fallback_question, pick_question
+from app.services.ai_question_service import generate_and_save_match_question
+from app.utils.starter_code import BASIC_STARTER_CODE
 from app.services.room_service import generate_unique_room_code, get_active_room
 
 router = APIRouter(prefix="/api/v1/rooms", tags=["Rooms"])
+logger = logging.getLogger(__name__)
 
 # AC 1.2: chỉ chuyển tiếp tối đa 1 tín hiệu typing mỗi giây cho mỗi người chơi
 TYPING_THROTTLE_SECONDS = 1.0
@@ -44,7 +48,7 @@ def question_payload(question: Question) -> dict:
         "difficulty": question.difficulty,
         "time_limit": question.time_limit,
         "memory_limit": question.memory_limit,
-        "starter_code": question.starter_code,
+        "starter_code": BASIC_STARTER_CODE,
         "public_testcases": public_test_cases(question.test_cases),
     }
 
@@ -145,17 +149,11 @@ async def finished_event(db: AsyncSession, room: Room) -> dict | None:
     }
 
 
-async def start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
+async def _start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
     aborted = {
         "event": "COUNTDOWN_ABORTED",
         "data": {"message": "Người chơi đã rời phòng"},
     }
-    for value in range(3, 0, -1):
-        if not manager.is_counting(room_code, cid):
-            await manager.broadcast(room_code, aborted)
-            return
-        await manager.broadcast(room_code, {"event": "COUNTDOWN", "data": {"value": value}})
-        await asyncio.sleep(1)
     if not manager.is_counting(room_code, cid):
         await manager.broadcast(room_code, aborted)
         return
@@ -164,27 +162,59 @@ async def start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
         if room is None or room.status != "WAITING":
             await manager.cancel_countdown(room_code, cid)
             return
-        # Phòng Ranked đã có sẵn question_id lúc ghép trận -> dùng lại, không bốc câu khác
-        question = await db.get(Question, room.question_id) if room.question_id else None
-        if question is None:
-            question = await pick_question(db, room.problem_set_id)
-        if question is None:
-            players = (
-                await db.execute(select(RoomPlayer).where(RoomPlayer.room_id == room.id))
-            ).scalars().all()
-            for player in players:
-                player.is_ready = False
+        # Bắt đầu ra đề ngay sau khi cả hai người chơi sẵn sàng/kết nối.
+        # Release the room lookup transaction while waiting for the AI provider.
+        await db.commit()
+        await manager.broadcast(room_code, {"event": "AI_GENERATING", "data": {}})
+        question = None
+        question_source = "AI"
+        try:
+            question = await generate_and_save_match_question(db, room.id)
+            if not manager.is_counting(room_code, cid):
+                await db.rollback()
+                await manager.broadcast(room_code, aborted)
+                return
+            room.question_id = question.id
             await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("AI question generation failed for room %s; using fallback", room_code)
+            question_source = "DATABASE_FALLBACK"
+            room = await db.get(Room, room_id)
+            if room is None or room.status != "WAITING":
+                await manager.cancel_countdown(room_code, cid)
+                return
+            # Ensure there is a small varied pool when the DB previously only had
+            # the single emergency seed question; this avoids repeating it forever.
+            await ensure_fallback_question(db)
+            question = await pick_question(db, room.problem_set_id)
+            if question is None and room.problem_set_id is not None:
+                question = await pick_question(db, None)
+
+        if question is None:
+            question = await ensure_fallback_question(db)
+            question_source = "BUILTIN_FALLBACK"
+
+        # Lưu question_id trước thông báo đề sẵn sàng và countdown.
+        room.question_id = question.id
+        await db.commit()
+        await manager.broadcast(room_code, {
+            "event": "QUESTION_READY",
+            "data": {"question_title": question.title, "source": question_source},
+        })
+
+        for value in range(3, 0, -1):
+            if not manager.is_counting(room_code, cid):
+                await manager.broadcast(room_code, aborted)
+                return
+            await manager.broadcast(room_code, {"event": "COUNTDOWN", "data": {"value": value}})
+            await asyncio.sleep(1)
+        if not manager.is_counting(room_code, cid):
+            await manager.broadcast(room_code, aborted)
+            return
+        room = await db.get(Room, room_id)
+        if room is None or room.status != "WAITING":
             await manager.cancel_countdown(room_code, cid)
-            await manager.broadcast(room_code, {
-                "event": "ERROR",
-                "data": {"message": "Không có bài toán khả dụng trong bộ đề"},
-            })
-            # Gửi lại trạng thái phòng để giao diện bỏ trạng thái "đã sẵn sàng"
-            await manager.broadcast(room_code, {
-                "event": "ROOM_STATE",
-                "data": await room_view(db, room),
-            })
             return
         room.question_id = question.id
         room.status = "PLAYING"
@@ -208,19 +238,35 @@ async def start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
         start_match_timer(room_code, room_id)
 
 
-async def try_auto_start(code: str, room: Room, db: AsyncSession) -> None:
-    """Phòng RANKED: cả 2 đã is_ready=True từ lúc ghép trận, nên bắt đầu đếm ngược
-    ngay khi cả 2 đã kết nối vào Arena (không cần action player_ready)."""
-    if room.game_mode != "RANKED_1V1" or room.status != "WAITING":
-        return
-    players = await load_players(db, room.id)
-    if len(players) != 2 or not all(player["is_ready"] for player in players):
-        return
-    if manager.connected_count(code) < 2:
-        return
-    cid = await manager.begin_countdown(code)
-    if cid is not None:
-        manager.track_task(asyncio.create_task(start_countdown(code, room.id, cid)))
+async def start_countdown(room_code: str, room_id: UUID, cid: int) -> None:
+    """Reset readiness and notify both clients if match setup unexpectedly fails."""
+    try:
+        await _start_countdown(room_code, room_id, cid)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Unexpected match setup failure for room %s", room_code)
+        await manager.cancel_countdown(room_code, cid)
+        room_state = None
+        try:
+            async with AsyncSessionLocal() as db:
+                room = await db.get(Room, room_id)
+                if room is not None and room.status == "WAITING":
+                    players = (await db.scalars(
+                        select(RoomPlayer).where(RoomPlayer.room_id == room.id)
+                    )).all()
+                    for player in players:
+                        player.is_ready = False
+                    await db.commit()
+                    room_state = await room_view(db, room)
+        except Exception:
+            logger.exception("Could not reset room %s after setup failure", room_code)
+        await manager.broadcast(room_code, {
+            "event": "ERROR",
+            "data": {"message": "Không thể chuẩn bị đề thi. Hãy thử sẵn sàng lại."},
+        })
+        if room_state is not None:
+            await manager.broadcast(room_code, {"event": "ROOM_STATE", "data": room_state})
 
 
 async def _reject_other_active_room(db: AsyncSession, user_id: UUID, allowed_room_id: UUID | None = None) -> None:
@@ -376,7 +422,6 @@ async def arena_websocket(
     result_event = await finished_event(db, room)
     if result_event is not None:
         await manager.send_personal(code, user.id, result_event)
-    await try_auto_start(code, room, db)
     last_typing_at = float("-inf")
     try:
         while True:
