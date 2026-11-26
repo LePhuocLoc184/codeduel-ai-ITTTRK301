@@ -6,10 +6,10 @@ import useScrollReveal from "../hooks/useScrollReveal"
 import "./Footer.css"
 
 const TEAM_MEMBERS = [
-  { name: "Lê Phước Lộc", studentId: "[Điền MSSV]", role: "Full-stack / Frontend Lead" },
-  { name: "[Thành viên 2 - Điền họ tên]", studentId: "[Điền MSSV]", role: "Backend & Judge Engine" },
-  { name: "[Thành viên 3 - Điền họ tên]", studentId: "[Điền MSSV]", role: "AI Review & Database" },
-  { name: "[Thành viên 4 - Điền họ tên]", studentId: "[Điền MSSV]", role: "UI/UX & Testing" },
+  { name: "Lê Phước Lộc", studentId: "N25DTCN100", role: "Backend & FrontEnd support" },
+  { name: "Nguyễn Đức Huy 2", studentId: "B25DTCN026", role: "Backend & Judge Engine" },
+  { name: "Hoàng Dương Nam", studentId: "[Điền MSSV]", role: "Backend & Judge Engine" },
+  { name: "Nguyễn Đức Huy 4", studentId: "[Điền MSSV]", role: "UI/UX & Testing" },
 ]
 
 export default function Footer() {
@@ -30,7 +30,7 @@ export default function Footer() {
             </p>
             <div className="footer-academic">
               <GraduationCap size={17} aria-hidden="true" />
-              <span>Đồ án môn học — Học viện Công nghệ Bưu chính Viễn thông (PTIT)</span>
+              <span>Đồ án Thực tập — Học viện Công nghệ Bưu chính Viễn thông (PTIT) & Rikkei Education</span>
             </div>
           </section>
 
