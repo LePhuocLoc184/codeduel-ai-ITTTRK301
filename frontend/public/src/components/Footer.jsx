@@ -7,9 +7,9 @@ import "./Footer.css"
 
 const TEAM_MEMBERS = [
   { name: "Lê Phước Lộc", studentId: "N25DTCN100", role: "Backend & FrontEnd support" },
-  { name: "Nguyễn Đức Huy 2", studentId: "B25DTCN026", role: "Backend & Judge Engine" },
-  { name: "Hoàng Dương Nam", studentId: "[Điền MSSV]", role: "Backend & Judge Engine" },
-  { name: "Nguyễn Đức Huy 4", studentId: "[Điền MSSV]", role: "UI/UX & Testing" },
+  { name: "Nguyễn Đức Huy 2", studentId: "N25DTCN120", role: "Backend & Judge Engine" },
+  { name: "Hoàng Dương Nam", studentId: "B25DTCN026", role: "Backend & Judge Engine" },
+  { name: "Nguyễn Đức Huy 4", studentId: "N25DTCN128", role: "UI/UX & Testing" },
 ]
 
 export default function Footer() {
