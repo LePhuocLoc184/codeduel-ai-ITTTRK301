@@ -5,12 +5,12 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.matchmaking_socket import matchmaking_manager
 from app.db.database import AsyncSessionLocal
-from app.models import MatchmakingEntry, Question, Room, RoomPlayer, User
+from app.models import MatchmakingEntry, Room, RoomPlayer, User
 from app.services.matchmaking import GAME_MODE_RANKED, match_found_message
 from app.services.room_service import generate_unique_room_code
 
@@ -20,7 +20,6 @@ TICK_SECONDS = 2               # Chu kỳ quét hàng đợi (2 giây/lần)
 BASE_RATING_GAP = 150          # Chênh lệch Rating tối đa khi chờ < 30 giây
 EXPANDED_RATING_GAP = 300      # Chênh lệch Rating tối đa khi chờ >= 30 giây
 EXPAND_AFTER_SECONDS = 30      # Mốc thời gian mở rộng biên độ ghép cặp
-READY_COUNTDOWN_SECONDS = 5    # Thời gian đếm ngược chuẩn bị vào trận (AC 4.3)
 
 Candidate = tuple[MatchmakingEntry, User]
 
@@ -95,15 +94,6 @@ async def fetch_searching(db: AsyncSession) -> list[Candidate]:
     return [(entry, user) for entry, user in rows]
 
 
-async def _pick_random_question(db: AsyncSession) -> Question:
-    """Bốc ngẫu nhiên 1 câu hỏi trong cơ sở dữ liệu cho phòng đấu."""
-    stmt = select(Question).order_by(func.random()).limit(1)
-    question = (await db.execute(stmt)).scalars().first()
-    if question is None:
-        raise RuntimeError("Không tìm thấy câu hỏi nào trong cơ sở dữ liệu để tạo phòng đấu")
-    return question
-
-
 async def create_ranked_room(db: AsyncSession, first: Candidate, second: Candidate) -> Room:
     """
     AC 4.1 + 4.2: Tự động tạo phòng đấu RANKED_1V1, gán câu hỏi ngẫu nhiên,
@@ -112,7 +102,6 @@ async def create_ranked_room(db: AsyncSession, first: Candidate, second: Candida
     entry1, user1 = first
     entry2, user2 = second
 
-    question = await _pick_random_question(db)
     now = datetime.now(timezone.utc)
 
     # Người vào hàng đợi sớm hơn sẽ được chọn làm chủ phòng (host)
@@ -120,21 +109,20 @@ async def create_ranked_room(db: AsyncSession, first: Candidate, second: Candida
     t2 = _ensure_utc(entry2.created_at)
     host_id = user1.id if t1 <= t2 else user2.id
 
-    # Khởi tạo phòng mới với chế độ RANKED_1V1 và gán question_id
+    # Đề được tạo/chọn trong start_countdown, không chặn worker ghép trận.
     room = Room(
         code=await generate_unique_room_code(db),
         host_id=host_id,
         game_mode=GAME_MODE_RANKED,
         status="WAITING",
-        question_id=question.id,
     )
     db.add(room)
     await db.flush()
 
-    # Thêm 2 người chơi vào phòng với trạng thái sẵn sàng (is_ready=True)
+    # Cả hai phải tự bấm Sẵn sàng trong phòng trước khi bắt đầu tạo đề.
     db.add_all([
-        RoomPlayer(room_id=room.id, user_id=user1.id, is_ready=True),
-        RoomPlayer(room_id=room.id, user_id=user2.id, is_ready=True),
+        RoomPlayer(room_id=room.id, user_id=user1.id, is_ready=False),
+        RoomPlayer(room_id=room.id, user_id=user2.id, is_ready=False),
     ])
 
     # Cập nhật trạng thái của 2 bản ghi tìm trận sang 'matched' và gán room_id

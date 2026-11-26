@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom"
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import MainLayout from "../layouts/MainLayout"
 import Dashboard from "../pages/Dashboard"
 import Welcome from "../pages/Welcome"
@@ -8,17 +8,23 @@ import Arena from "../pages/Arena"
 import Room from "../pages/Room"
 import Matchmaking from "../pages/Matchmaking"
 
+const router = createBrowserRouter([
+  {
+    element: <MainLayout />,
+    children: [
+      { path: "/", element: <Welcome /> },
+      { path: "/home", element: <Dashboard /> },
+      { path: "/login", element: <Login /> },
+      { path: "/register", element: <Register /> },
+      { path: "/arena", element: <Arena /> },
+      { path: "/matchmaking", element: <Matchmaking /> },
+    ],
+  },
+  // Combat Zen Mode: /room/:roomCode is outside MainLayout to use the full viewport.
+  { path: "/room/:roomCode", element: <Room /> },
+  { path: "*", element: <Navigate to="/" replace /> },
+])
+
 export default function AppRoutes() {
-  return <Routes>
-    <Route element={<MainLayout />}>
-      <Route path="/" element={<Welcome />} />
-      <Route path="/home" element={<Dashboard />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/arena" element={<Arena />} />
-      <Route path="/matchmaking" element={<Matchmaking />} />
-      <Route path="/room/:roomCode" element={<Room />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Route>
-  </Routes>
+  return <RouterProvider router={router} />
 }

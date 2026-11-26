@@ -44,16 +44,18 @@ function ArenaSidebar({
   opponentProgress = null,
   deadline = null,
   opponentTyping = false,
-  connection = "connecting",
+  connection = "connected",
   events = [],
 }) {
-  const percent = Math.min(100, Math.max(0, Number(opponentProgress?.percent) || 0))
+  const passed = Number(opponentProgress?.passed) || 0
+  const total = Number(opponentProgress?.total) || 0
+  const percent = total > 0 ? Math.min(100, Math.max(0, (passed / total) * 100)) : (Number(opponentProgress?.percent) || 0)
 
-  let status = "Đối thủ chưa gõ code."
-  if (connection === "reconnecting") status = "Mất kết nối, đang tự nối lại…"
-  if (connection === "disconnected") status = "Mất kết nối với phòng. Hãy tải lại trang để vào lại."
-  else if (opponent?.left) status = "Đối thủ đã rời phòng."
-  else if (opponentTyping) status = "Đối thủ đang gõ code…"
+  let statusText = "Đối thủ đang suy nghĩ giải thuật..."
+  if (connection === "reconnecting") statusText = "Mất kết nối, đang tự nối lại…"
+  if (connection === "disconnected") statusText = "Mất kết nối với phòng. Hãy tải lại trang."
+  else if (opponent?.left) statusText = "Đối thủ đã rời phòng."
+  else if (opponentTyping) statusText = "Đang gõ phím liên tục…"
 
   return (
     <div className="arena-sidebar">
@@ -61,6 +63,11 @@ function ArenaSidebar({
         <div className="side-card-head">
           <Swords size={14} />
           <span className="panel-label">ĐỐI THỦ</span>
+          {opponentProgress && (
+            <span className="opponent-score-badge">
+              {passed}/{total} Passed
+            </span>
+          )}
         </div>
 
         <div className="side-card-body">
@@ -68,8 +75,17 @@ function ArenaSidebar({
             <div className="opponent-card">
               <Avatar url={opponent.avatar_url} name={opponent.username} className="avatar-lg" />
               <span>
-                <b title={opponent.username}>{opponent.username}</b>
-                <small>{opponent.rating} điểm{opponent.left ? " · đã rời phòng" : ""}</small>
+                <span className="opponent-name-row">
+                  <b title={opponent.username}>{opponent.username}</b>
+                  <span
+                    className={`opponent-typing-waveform${opponentTyping && connection === "connected" && !opponent.left ? " is-active" : ""}`}
+                    aria-label={opponentTyping && connection === "connected" && !opponent.left ? "Đối thủ đang gõ code" : undefined}
+                    aria-hidden={!(opponentTyping && connection === "connected" && !opponent.left)}
+                  >
+                    <i /><i /><i /><i /><i />
+                  </span>
+                </span>
+                <small>{opponent.rating} ELO{opponent.left ? " · đã rời phòng" : ""}</small>
                 <em className={`rank-chip rank-chip-${rankBadgeFor(Number(opponent.rating) || 0).toLowerCase()}`}>
                   <Shield size={11} /> {rankBadgeFor(Number(opponent.rating) || 0)}
                 </em>
@@ -79,19 +95,25 @@ function ArenaSidebar({
             "Đang chờ thông tin đối thủ…"
           )}
 
-          {opponentProgress && (
+          {/* Segmented Testcase Progression */}
+          {opponentProgress && total > 0 && (
             <div className="opponent-progress">
-              <div
-                className="progress-bar"
-                role="progressbar"
-                aria-label="Tiến độ của đối thủ"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(percent)}
-              >
-                <i style={{ width: `${percent}%` }} />
+              <div className="segmented-progress-wrap" role="progressbar" aria-valuenow={passed} aria-valuemax={total} aria-label="Tiến độ testcase đối thủ">
+                {Array.from({ length: total }, (_, i) => {
+                  const isPassed = i < passed
+                  return (
+                    <div
+                      key={i}
+                      className={`progress-segment ${isPassed ? "segment-passed" : "segment-pending"}`}
+                      title={`Testcase ${i + 1}: ${isPassed ? "Passed" : "Pending"}`}
+                    />
+                  )
+                })}
               </div>
-              <small>{opponentProgress.passed}/{opponentProgress.total} testcase</small>
+              <div className="progress-meta">
+                <span>{passed}/{total} testcase</span>
+                <span>{Math.round(percent)}% hoàn thành</span>
+              </div>
             </div>
           )}
         </div>
@@ -100,7 +122,7 @@ function ArenaSidebar({
       <section className="side-card">
         <div className="side-card-head">
           <Clock size={14} />
-          <span className="panel-label">THỜI GIAN</span>
+          <span className="panel-label">THỜI GIAN THI ĐẤU</span>
         </div>
         <div className="side-card-body"><MatchClock deadline={deadline} /></div>
       </section>
@@ -108,18 +130,20 @@ function ArenaSidebar({
       <section className="side-card">
         <div className="side-card-head">
           <Keyboard size={14} />
-          <span className="panel-label">TRẠNG THÁI</span>
+          <span className="panel-label">TRẠNG THÁI GÕ PHÍM</span>
         </div>
         <div className="side-card-body" aria-live="polite">
-          {opponentTyping && connection === "connected" && !opponent?.left && <i className="typing-dot" />}
-          {status}
+          <div className="typing-status-container">
+            <span className={`typing-state-indicator${opponentTyping && connection === "connected" && !opponent?.left ? " is-active" : ""}`} />
+            <span className="typing-text">{statusText}</span>
+          </div>
         </div>
       </section>
 
       <section className="side-card">
         <div className="side-card-head">
           <ScrollText size={14} />
-          <span className="panel-label">SỰ KIỆN</span>
+          <span className="panel-label">DIỄN BIẾN TRẬN ĐẤU</span>
         </div>
 
         <div className="side-card-body">
